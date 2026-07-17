@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>swarmOS · LUDI</title>
+<style>
+  @font-face {
+    font-family: 'Poppins';
+    src: url('assets/fonts/poppins-400.woff2') format('woff2');
+    font-weight: 400; font-style: normal; font-display: block;
+  }
+  @font-face {
+    font-family: 'Poppins';
+    src: url('assets/fonts/poppins-600.woff2') format('woff2');
+    font-weight: 600; font-style: normal; font-display: block;
+  }
+  @font-face {
+    font-family: 'Poppins';
+    src: url('assets/fonts/poppins-700.woff2') format('woff2');
+    font-weight: 700; font-style: normal; font-display: block;
+  }
+  @font-face {
+    font-family: 'Poppins';
+    src: url('assets/fonts/poppins-600-italic.woff2') format('woff2');
+    font-weight: 600; font-style: italic; font-display: block;
+  }
+
+  html, body { margin: 0; min-height: 100%; background: #fff; }
+  body {
+    display: flex; flex-direction: column; align-items: center;
+    font-family: 'Poppins', ui-sans-serif, sans-serif;
+    user-select: none; -webkit-user-select: none;
+    padding: 34px 0 60px;
+  }
+  h1 {
+    margin: 0; font-size: 25px; font-weight: 700; color: #3a3e41;
+    letter-spacing: .01em;
+  }
+  #modi {
+    margin: 2px 0 44px; font-size: 17px; font-weight: 600; font-style: italic;
+    display: flex; gap: 14px;
+  }
+  #modi span { color: #c4c9cc; cursor: pointer; transition: color .25s; }
+  #modi span.aktiv { color: #16c784; cursor: default; }
+  canvas {
+    border-radius: 26px;
+    background: #2b2e31;
+    cursor: crosshair;
+    touch-action: none;
+    display: block;
+  }
+</style>
+</head>
+<body>
+  <h1>swarmOS</h1>
+  <div id="modi">
+    <span id="m-wide">wide</span>
+    <span id="m-high">high</span>
+  </div>
+  <canvas id="feld"></canvas>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
