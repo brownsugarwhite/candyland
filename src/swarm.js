@@ -78,7 +78,11 @@ export function createSwarm(gitter, defaultShape, tNow = 0) {
   store.edges = gitter.edges;
   store.extraLines = []; // [x0,y0,x1,y1, r,g,b,a] je Linie (0..1) — pro Frame
   store.linse = { holes: [], tunnelT: 0, tcx: 0, tcy: 0, zeit: 0 }; // Post-FX
-  store.funnel = { holes: [] }; // 3D-Wurmloch-Trichter (renderformat)
+  store.p3d = { // echte 3D-Lochkamera (renderformat.project3d)
+    aktiv: false, holes: [],
+    hc: 1, h0: 1, tilt: 0, sinT: 0, cosT: 1,
+    zMax: 26, dimm: 0.12,
+  };
   store.freeList = new Int32Array(n - gitter.latticeCount);
   let w = 0;
   for (let i = n - 1; i >= gitter.latticeCount; i--) store.freeList[w++] = i;

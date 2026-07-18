@@ -98,7 +98,7 @@ struct LOut { @builtin(position) pos: vec4f, @location(0) col: vec4f };
 
 // ---- Post-Process: Wurmloch-Fahrt (Rolle + Aberration) -----------------
 // Die Raumkrümmung des Wurmlochs selbst ist ECHTES 3D im Gitter
-// (renderformat.funnelProject) — hier gibt es keine Linse mehr.
+// (renderformat.project3d) — hier gibt es keine Linse mehr.
 struct Fahrt {
   fx: vec4f, // rotWinkel, tcx, tcy, smear
 };

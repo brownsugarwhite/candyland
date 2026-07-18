@@ -9,6 +9,7 @@ import {
   rebuildActiveList, baseSize, CIRCLE, SQUARE,
 } from './swarm.js';
 import { releaseAgents } from './assign.js';
+import { project3d } from './renderformat.js';
 import { rasterizeText, rasterRows } from './rasterize.js';
 import { shapeId, glyphShape } from './formen.js';
 import { askBrain, hasKey, setKey, clearKey } from './brain.js';
@@ -206,6 +207,16 @@ export function createDirigent(store, kamera) {
         showNote(hasKey()
           ? 'key einfügen (⌘v) + enter · „weg" löscht · esc behält'
           : 'api-key einfügen (⌘v) und enter drücken');
+        return;
+      }
+      if (tl === 'frei') {
+        // Perspektive entsperren: die gelockte Draufsicht neigt sich —
+        // man sieht die 3D-Szene (und den Tubus) wirklich von schräg
+        feld.close();
+        tiltTgt = tiltTgt > 0 ? 0 : CONFIG.p3d.neigung;
+        showNote(tiltTgt > 0
+          ? 'perspektive entsperrt — „frei" sperrt zurück'
+          : 'perspektive gesperrt — draufsicht');
         return;
       }
       if (tl === 'tunnel' || tl === 'ordner') {
@@ -479,26 +490,25 @@ export function createDirigent(store, kamera) {
     }
   }
 
-  // ---- TUNNEL: echtes 3D-Wurmloch im Gitter -----------------------------
-  // Das Wurmloch ist eine Trichterfläche im Raum selbst: das Gitter samt
-  // Netz-Linien gleitet sie hinab (renderformat.funnelProject, Flamm-
-  // Einbettung, perspektivisch von oben projiziert) — keine Post-Process-
-  // Linse, keine Bandtönung. hole.r ist der SICHTBARE Schlund-Ring; in
-  // Weltkoordinaten liegt der Schlund bei rs = r·(H+tiefe)/H. Hier leben
-  // Platzierung (Drag), Label + Dreiecks-Marker und die REISE: ein
-  // kontinuierlicher Kameraflug in den Trichter mit 180°-Z-Rolle,
-  // Ankunft als Wasser-Ringwelle in der anderen Dimension.
+  // ---- TUNNEL: echtes 3D-Wurmloch -----------------------------------------
+  // Der Schwarm ist eine echte 3D-Szene (renderformat.project3d): die
+  // Lochkamera blickt gelockt senkrecht von oben (Grundlook unverändert),
+  // aber der Schlund ist ein unendlich tiefer Tubus mit echter Perspektive
+  // und Parallaxe. Hier leben Platzierung (Drag), Label + Dreiecks-Marker,
+  // die Perspektiven-Entsperrung („frei") und die REISE: die Kamerahöhe
+  // taucht WIRKLICH durch die Oberfläche in den Tubus (diveHc) mit
+  // 180°-Z-Rolle; Ankunft als Wasser-Ringwelle in der anderen Dimension.
   const dimHoles = [[], []];
   let dim = 0;
   let reise = null;      // { phase, t0, hole, scale0, cx0, cy0, switched }
   let holeDrag = null;   // { hole, lastX, lastY, movedPx }
   let reiseRot = 0;      // Sichtrolle während des Durchflugs (0..π)
   let reiseSmear = 0;    // ruhige radiale Aberration
+  let diveHc = null;     // Kamerahöhe während des Flugs (sonst Ruhehöhe)
+  let tiltTgt = 0;       // „frei": Ziel-Neigung der entsperrten Perspektive
+  let tiltCur = 0;
   let suppressClick = 0;
-
-  // Welt-Radius des Schlunds: alles innerhalb ist „unten" im Loch
-  const rsWorld = (h) =>
-    h.r * (CONFIG.tunnel.kameraH + CONFIG.tunnel.tiefe) / CONFIG.tunnel.kameraH;
+  const RP = { x: 0, y: 0, k: 1, dim: 1, hidden: false };
 
   function formHoleLabel(hole) {
     const T = CONFIG.tunnel;
@@ -559,10 +569,7 @@ export function createDirigent(store, kamera) {
   function holeAt(wx, wy) {
     for (const h of dimHoles[dim]) {
       const dx = wx - h.x, dy = wy - h.y;
-      // der ganze Weltbereich des Schlunds zählt — visuell ist das
-      // genau der Trichter bis knapp hinter den sichtbaren Ring
-      const R = rsWorld(h);
-      if (dx * dx + dy * dy < R * R) return h;
+      if (dx * dx + dy * dy < (h.r * 1.15) ** 2) return h;
     }
     return null;
   }
@@ -647,26 +654,27 @@ export function createDirigent(store, kamera) {
     const H = reise.hole;
     const glatt = (p) => p * p * (3 - 2 * p);
     if (reise.phase === 'flug') {
-      // EIN kontinuierlicher 3D-Flug, ohne Schnitte: die Kamera fliegt
-      // ins Loch (der Ring wächst dadurch von selbst über den Schirm),
-      // rollt dabei um Z auf 180°, und fliegt aus dem Austritts-Tunnel
-      // der anderen Dimension wieder heraus. Der Dimensionswechsel
-      // passiert exakt in der Mitte — unsichtbar, weil die Mündung dann
-      // den ganzen Schirm umschließt.
+      // ECHTER 3D-STURZ, ohne Schnitte: die Kamera gleitet über den
+      // Schlund und ihre HÖHE taucht durch die Oberfläche in den Tubus —
+      // die Fläche rauscht perspektivisch nach außen vorbei, die
+      // Tubus-Ringe ziehen durch, dabei rollt die Sicht um Z auf 180°.
+      // Der Dimensionswechsel liegt am tiefsten Punkt (ringsum nur noch
+      // dunkle Tiefe), dann steigt die Kamera aus dem Austritts-Tubus
+      // der anderen Dimension wieder auf.
       const p = Math.min(1, (t - reise.t0) / T.flugSec);
-      // Ziel-Zoom: Ring sicher außerhalb der Bilddiagonale
-      const halfDiag = Math.hypot(kamera.viewW, kamera.viewH) / 2;
-      const zoomMax = (halfDiag * 1.45) / H.r;
-      // symmetrische Log-Zoom-Kurve: rein … Scheitel … wieder raus
-      const dreieck = 1 - Math.abs(1 - 2 * p);
-      const k = glatt(Math.min(1, dreieck * 1.15));
-      const scale = reise.scale0 * Math.pow(zoomMax / reise.scale0, k);
       const anflug = glatt(Math.min(1, p * 2.2));
       kamera.setView(
         reise.cx0 + (H.x - reise.cx0) * anflug,
         reise.cy0 + (H.y - reise.cy0) * anflug,
-        scale,
+        reise.scale0,
       );
+      const h0 = (kamera.viewH / kamera.scale) * CONFIG.p3d.hFac;
+      const zTief = CONFIG.p3d.zMax * 0.85;
+      const dreieck = 1 - Math.abs(1 - 2 * p); // rein … Scheitel … raus
+      // erst anfliegen, DANN stürzen — sonst taucht die Kamera ab,
+      // bevor sie über dem Schlund steht
+      const sturz = glatt(Math.max(0, (dreieck - 0.14) / 0.86));
+      diveHc = h0 - (h0 + zTief) * sturz;
       // Z-Rolle: kontinuierlich 0 → 180° über den ganzen Flug
       reiseRot = Math.PI * glatt(p);
       reiseSmear = Math.sin(Math.PI * p) * 0.55;
@@ -678,6 +686,7 @@ export function createDirigent(store, kamera) {
         // 180° im Schachbrett = deckungsgleich → Rolle unsichtbar lösen
         reiseRot = 0;
         reiseSmear = 0;
+        diveHc = null;
         kamera.snapClamped(reise.scale0);
         reise.phase = 'welle';
         reise.t0 = t;
@@ -691,23 +700,26 @@ export function createDirigent(store, kamera) {
     }
   }
 
-  // der sichtbare Schlund-Ring: eine feine Linie aus 48 Segmenten
+  // der Schlund-Ring: eine feine Linie am Mund des Tubus (z = 0),
+  // durch DIESELBE 3D-Kamera projiziert wie alles andere
   function ringLines(h) {
+    const P = store.p3d;
     const a = CONFIG.tunnel.ringAlpha;
     const N = 48;
-    let px = h.x + h.r, py = h.y;
-    for (let k = 1; k <= N; k++) {
+    let px = 0, py = 0, hat = false;
+    for (let k = 0; k <= N; k++) {
       const w = (k / N) * Math.PI * 2;
-      const nx = h.x + Math.cos(w) * h.r, ny = h.y + Math.sin(w) * h.r;
-      store.extraLines.push(px, py, nx, ny, 0.92, 0.96, 0.94, a);
-      px = nx; py = ny;
+      project3d(P, kamera, h.x + Math.cos(w) * h.r, h.y + Math.sin(w) * h.r, 0, RP);
+      if (RP.hidden) { hat = false; continue; }
+      if (hat) store.extraLines.push(px, py, RP.x, RP.y, 0.92, 0.96, 0.94, a);
+      px = RP.x; py = RP.y; hat = true;
     }
   }
 
-  // Fahrt-FX (Sichtrolle + Aberration) und Trichter-Daten der Renderer.
-  // store.linse.holes bleibt LEER — die Raumkrümmung ist echtes 3D im
-  // Gitter (store.funnel), kein Screen-Space-Effekt mehr.
-  function linseUpdate(t) {
+  // Fahrt-FX (Sichtrolle + Aberration) und die echte 3D-Kamera (store.p3d).
+  // store.linse.holes bleibt LEER — Raumkrümmung ist Geometrie, kein
+  // Screen-Space-Effekt.
+  function linseUpdate(t, dt) {
     const L = store.linse;
     L.holes.length = 0;
     L.rot = reiseRot;
@@ -717,18 +729,27 @@ export function createDirigent(store, kamera) {
     L.zeit = t;
 
     const T = CONFIG.tunnel;
-    const F = store.funnel;
-    F.holes.length = 0;
+    const P = store.p3d;
+    P.holes.length = 0;
     const sichtbar = activeApp ? [] : (reise ? [reise.hole] : dimHoles[dim]);
     for (const h of sichtbar) {
-      const rs = rsWorld(h);
-      F.holes.push({
-        x: h.x, y: h.y, rs,
-        tiefe: T.tiefe, weite: T.weite, H: T.kameraH,
-        reich: rs + 4 * T.weite,
+      const reich = h.r + T.weite * 6;
+      P.holes.push({
+        x: h.x, y: h.y, r: h.r, tiefe: T.tiefe, weite: T.weite, reich,
+        zOff: T.tiefe * Math.pow(T.weite / (reich - h.r), 0.8),
       });
-      ringLines(h);
     }
+    tiltCur += (tiltTgt - tiltCur) * Math.min(1, 5 * dt);
+    if (Math.abs(tiltCur) < 0.002 && tiltTgt === 0) tiltCur = 0;
+    P.h0 = (kamera.viewH / kamera.scale) * CONFIG.p3d.hFac;
+    P.hc = diveHc !== null ? diveHc : P.h0;
+    P.tilt = tiltCur;
+    P.sinT = Math.sin(tiltCur);
+    P.cosT = Math.cos(tiltCur);
+    P.zMax = CONFIG.p3d.zMax;
+    P.dimm = CONFIG.p3d.dimm;
+    P.aktiv = P.holes.length > 0 || tiltCur !== 0 || diveHc !== null;
+    for (const h of sichtbar) ringLines(h);
   }
 
   // ---- Apps (der Schwarm morpht zum Screen) ------------------------------
@@ -747,6 +768,7 @@ export function createDirigent(store, kamera) {
   function openApp(app) {
     if (activeApp) closeApp();
     if (karte.isOpen) karte.close();
+    tiltTgt = 0; // Apps immer in gesperrter Draufsicht
     activeApp = app;
     app.open(tNow);
   }
@@ -875,7 +897,7 @@ export function createDirigent(store, kamera) {
     karte.update(t);
     if (activeApp) activeApp.update(t, cursor);
     reiseUpdate(t);
-    linseUpdate(t);
+    linseUpdate(t, dt);
 
     if (thinkIds.length > 0) {
       const b = 0.5 + 0.5 * Math.sin(t * 4);
@@ -958,7 +980,7 @@ export function createDirigent(store, kamera) {
       if (brainRect) return brainRect;
       return null;
     },
-    get holes() { return store.funnel.holes; }, // Trichter (nur Diagnose)
+    get holes() { return store.p3d.holes; }, // Tunnel (nur Diagnose)
     get dim() { return dim; },
     get brainBusy() { return brainBusy; },
     agentName, taskLines,

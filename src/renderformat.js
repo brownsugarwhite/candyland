@@ -3,73 +3,130 @@
 //   [x, y, size, rot, r, g, b, shapeA, shapeB, shapeT, frei, frei] = 12 f32 (48 B)
 // Koordinaten/Größe in WELTEINHEITEN; Farbe bereits mit Helligkeit
 // multipliziert (premultiplied über dunklem Grund).
+import { CONFIG } from './config.js';
+import { STATE } from './swarm.js';
+
 export const INST_FLOATS = 12;
 
-// ---- Wurmloch-Trichter: ECHTES 3D statt Post-Process-Linse ----------------
-// Der Raum um jeden Tunnel ist eine Trichterfläche (Flamm-Einbettung):
-// Tiefe unter der Ebene z(d) = tiefe·exp(-(d-rs)/weite), senkrecht von
-// oben aus Höhe H betrachtet. Ein Flächenpunkt bei Radius d erscheint
-// perspektivisch bei rp = d·H/(H+z) — das Gitter samt Verbindungslinien
-// gleitet den Trichter hinab, Kacheln stauchen sich zu Bögen und sammeln
-// sich am Schlund (d = rs) auf dem sichtbaren Ring r = rs·H/(H+tiefe);
-// mit der Tiefe werden sie kleiner und dunkler. Innerhalb rs ist die Welt
-// „unten" im Loch → unsichtbar. Reine Darstellung zur Packzeit: Physik,
-// Identität und Interaktion bleiben unberührt — und ALLE Backends teilen
-// exakt dieselbe Geometrie.
-export function funnelProject(holes, x, y, out) {
-  let f = 1, dim = 1;
+// ---- ECHTES 3D ------------------------------------------------------------
+// Der Schwarm lebt auf der Ebene z = 0 (z zeigt in den Boden) und wird
+// IMMER durch eine echte Lochkamera projiziert: Sie hängt in Höhe hc über
+// dem Kamera-Pivot (kamera.cx/cy) und blickt senkrecht nach unten —
+// GELOCKTE Perspektive. Für flache Punkte (z = 0, tilt = 0) ist diese
+// Projektion mathematisch EXAKT die bisherige direkte Abbildung: der
+// Grundlook ändert sich nie um ein Pixel. Alles mit Tiefe (der Wurmloch-
+// Schlund ist ein unendlich tiefer Tubus) zeigt echte Perspektive und
+// echte Parallaxe. store.p3d hält den Kamerazustand: hc = aktuelle Höhe
+// (der Wurmloch-Flug taucht damit WIRKLICH durch die Oberfläche), h0 =
+// Ruhehöhe, tilt = Neigung der entsperrten Perspektive („frei"-Befehl).
+// Die Ausgabe sind Pseudo-Welt-Koordinaten — die Backend-Shader rechnen
+// unverändert screen = (p − cam)·scale + mitte. Solange p3d.aktiv falsch
+// ist (kein Tunnel, keine Neigung, kein Flug), läuft der schnelle
+// Originalpfad ganz ohne Projektion.
+
+// Tiefe eines Flächenpunkts: Wurmloch-Einbettung z = tiefe·(weite/(d−r))^0.8
+// — unendlich tief am Schlundrand, kontinuierlich 0 am Reichweiten-Rand
+export function tiefeAt(P, x, y) {
+  let z = 0;
+  const holes = P.holes;
   for (let k = 0; k < holes.length; k++) {
     const h = holes[k];
     const dx = x - h.x, dy = y - h.y;
     const d = Math.sqrt(dx * dx + dy * dy);
     if (d >= h.reich) continue;
-    if (d <= h.rs) { out.hidden = true; return out; }
-    const z = h.tiefe * Math.exp(-(d - h.rs) / h.weite);
-    const pf = h.H / (h.H + z);
-    x = h.x + dx * pf;
-    y = h.y + dy * pf;
-    f *= pf;
-    dim *= Math.sqrt(pf);               // milde Tiefen-Abdunklung
-    const fade = (d - h.rs) * 1.6;      // Versinken an der Kante: die
-    if (fade < 1) f *= fade;            // Kacheln schrumpfen sanft auf 0
+    const a = d - h.r;
+    z += a <= 0.001 ? P.zMax : h.tiefe * Math.pow(h.weite / a, 0.8) - h.zOff;
   }
-  out.x = x; out.y = y; out.f = f; out.dim = dim; out.hidden = false;
+  if (z <= 0) return 0;
+  return z > P.zMax ? P.zMax : z;
+}
+
+// Lochkamera-Projektion → Pseudo-Welt; k = Größenfaktor, dim = Tiefenlicht
+export function project3d(P, kamera, x, y, z, out) {
+  let rx = x - kamera.cx, ry = y - kamera.cy, rz = z;
+  if (P.tilt !== 0) {
+    const vy = P.cosT * ry - P.sinT * rz;
+    rz = P.sinT * ry + P.cosT * rz;
+    ry = vy;
+  }
+  const depth = P.hc + rz;
+  if (depth < 1.0) { out.hidden = true; return out; } // Near-Plane der Kamera
+  const k = P.h0 / depth;
+  out.x = kamera.cx + rx * k;
+  out.y = kamera.cy + ry * k;
+  out.k = k;
+  out.dim = z > 0.001 ? Math.exp(-z * P.dimm) : 1;
+  out.hidden = false;
   return out;
 }
 
-const FP_A = { x: 0, y: 0, f: 1, dim: 1, hidden: false };
-const FP_B = { x: 0, y: 0, f: 1, dim: 1, hidden: false };
+const PJ_A = { x: 0, y: 0, k: 1, dim: 1, hidden: false };
+const PJ_B = { x: 0, y: 0, k: 1, dim: 1, hidden: false };
+
+// Tiefennebel: tiefe Agenten versinken in der HINTERGRUNDFARBE (nicht in
+// Schwarz) — dim = 1 obenauf, dim = 0 unten = unsichtbar vor dem Grund
+const FOG = hexToRgb01('#31353a');
+
+// Tiefe nur für gebundene Gitteragenten — Label, Claws, App- und
+// Reserve-Agenten schweben als OS-Ebene flach auf z = 0
+function agentZ(P, store, i) {
+  return i < store.latticeCount && store.state[i] <= STATE.RETURNING
+    ? tiefeAt(P, store.posX[i], store.posY[i]) : 0;
+}
 
 // Aktive, sichtbare Agenten in arr packen (Kamera-Culling inklusive).
 // → Anzahl geschriebener Instanzen.
 export function packInstances(store, kamera, arr) {
   const {
     activeList, activeCount, active, posX, posY, size, brightness,
-    colR, colG, colB, rot, shapeA, shapeB, shapeT, state, latticeCount,
+    colR, colG, colB, rot, shapeA, shapeB, shapeT,
   } = store;
-  const F = store.funnel && store.funnel.holes.length > 0
-    ? store.funnel.holes : null;
+  const P = store.p3d;
+  const aktiv = !!(P && P.aktiv);
   const scale = kamera.scale;
   const cx = kamera.cx, cy = kamera.cy;
   const halfW = kamera.viewW / 2 / scale;
   const halfH = kamera.viewH / 2 / scale;
   const inv = 1 / 255;
   let w = 0;
-  for (let k = 0; k < activeCount; k++) {
-    const i = activeList[k];
-    if (active[i] === 0) continue;
+
+  // Maler-Reihenfolge: mit Tiefe wird fern → nah gezeichnet, damit die
+  // nähere Trichterwand die tiefere verdeckt
+  let liste = null;
+  if (aktiv) {
+    liste = [];
+    for (let k = 0; k < activeCount; k++) {
+      const i = activeList[k];
+      if (active[i] === 0) continue;
+      const z = agentZ(P, store, i);
+      const rz = P.tilt !== 0 ? P.sinT * (posY[i] - cy) + P.cosT * z : z;
+      liste.push({ i, z, dep: P.hc + rz });
+    }
+    liste.sort((a, b) => b.dep - a.dep);
+  }
+
+  const n = aktiv ? liste.length : activeCount;
+  for (let k = 0; k < n; k++) {
+    let i, z = 0;
+    if (aktiv) {
+      i = liste[k].i;
+      z = liste[k].z;
+    } else {
+      i = activeList[k];
+      if (active[i] === 0) continue;
+    }
     let b = brightness[i];
     if (b <= 0.01) continue;
     let px = posX[i], py = posY[i], sz = size[i];
-    // Wurmloch: Gitteragenten gleiten den Trichter hinab (nur Darstellung);
-    // Label, Claws und App-Agenten (TEXT/Reserve) bleiben unberührt
-    if (F !== null && i < latticeCount && state[i] <= STATE.RETURNING) {
-      funnelProject(F, px, py, FP_A);
-      if (FP_A.hidden) continue;
-      px = FP_A.x; py = FP_A.y;
-      sz *= FP_A.f;
-      b *= FP_A.dim;
-      if (b <= 0.01) continue;
+    let fog = 1;
+    if (aktiv) {
+      project3d(P, kamera, px, py, z, PJ_A);
+      if (PJ_A.hidden) continue;
+      px = PJ_A.x;
+      py = PJ_A.y;
+      sz *= PJ_A.k;
+      fog = PJ_A.dim;
+      if (fog <= 0.03) continue; // ganz unten = eins mit dem Grund
     }
     const half = sz * 0.6; // etwas Luft für Rotation/AA
     if (px + half < cx - halfW || px - half > cx + halfW ||
@@ -78,9 +135,9 @@ export function packInstances(store, kamera, arr) {
     arr[w++] = py;
     arr[w++] = sz;
     arr[w++] = rot[i];
-    arr[w++] = colR[i] * b * inv;
-    arr[w++] = colG[i] * b * inv;
-    arr[w++] = colB[i] * b * inv;
+    arr[w++] = colR[i] * b * inv * fog + FOG[0] * (1 - fog);
+    arr[w++] = colG[i] * b * inv * fog + FOG[1] * (1 - fog);
+    arr[w++] = colB[i] * b * inv * fog + FOG[2] * (1 - fog);
     arr[w++] = shapeA[i];
     arr[w++] = shapeB[i];
     arr[w++] = shapeT[i] < 0 ? 0 : shapeT[i];
@@ -93,17 +150,14 @@ export function packInstances(store, kamera, arr) {
 // Linien-Vertices packen: [x, y, r, g, b, a] — Mesh-Kanten (Aktivität
 // lässt Synapsen aufleuchten) + freie Linien aus store.extraLines
 // (Vektor-Pfade, 3D-Drahtgitter, Handle-Arme).
-import { CONFIG } from './config.js';
-import { STATE } from './swarm.js';
-
 export const LINE_FLOATS = 6;
 
 // → { nMesh, nTotal }: Mesh-Linien [0, nMesh) unter den Agenten,
 // freie Linien [nMesh, nTotal) DARÜBER (Vektor-Pfade, 3D-Kanten)
 export function packLines(store, kamera, arr) {
   let w = 0;
-  const F = store.funnel && store.funnel.holes.length > 0
-    ? store.funnel.holes : null;
+  const P = store.p3d;
+  const aktiv = !!(P && P.aktiv);
   const scale = kamera.scale;
   const cx = kamera.cx, cy = kamera.cy;
   const halfW = kamera.viewW / 2 / scale + 1;
@@ -133,16 +187,21 @@ export function packLines(store, kamera, arr) {
       if (a > N.maxAlpha) a = N.maxAlpha;
       if (a < 0.012) continue;
       let x0 = posX[i], y0 = posY[i], x1 = posX[j], y1 = posY[j];
-      // die Verbindungslinien folgen dem Trichter — SIE zeichnen die
-      // gekrümmte Raumfläche des Wurmlochs (Referenz-Bild)
-      if (F !== null) {
-        funnelProject(F, x0, y0, FP_A);
-        funnelProject(F, x1, y1, FP_B);
-        if (FP_A.hidden || FP_B.hidden) continue;
-        x0 = FP_A.x; y0 = FP_A.y; x1 = FP_B.x; y1 = FP_B.y;
-        // je tiefer im Trichter, desto heller glüht das Raumnetz
-        const tiefe = 1 - Math.min(FP_A.f, FP_B.f);
-        a = Math.min(0.5, a + 0.4 * tiefe * tiefe);
+      // das Raumnetz folgt der 3D-Fläche — SIE zeichnet den Tubus
+      if (aktiv) {
+        project3d(P, kamera, x0, y0, tiefeAt(P, x0, y0), PJ_A);
+        project3d(P, kamera, x1, y1, tiefeAt(P, x1, y1), PJ_B);
+        if (PJ_A.hidden || PJ_B.hidden) continue;
+        x0 = PJ_A.x; y0 = PJ_A.y; x1 = PJ_B.x; y1 = PJ_B.y;
+        // nahe der Near-Plane explodiert die Projektion — solche
+        // extrem gestreckten Kanten fächern hässlich: weglassen
+        const pdx = x1 - x0, pdy = y1 - y0;
+        if (pdx * pdx + pdy * pdy > 40) continue;
+        // das Raumnetz GLÜHT im Tubus (Referenzbild) — es dimmt mit der
+        // Tiefe nur sanft, während die Kacheln im Nebel versinken
+        const tiefe = 1 - Math.min(PJ_A.dim, PJ_B.dim);
+        const glut = Math.max(PJ_A.dim, PJ_B.dim);
+        a = Math.min(0.5, a + 0.4 * tiefe) * (0.35 + 0.65 * glut);
       }
       arr[w++] = x0; arr[w++] = y0;
       arr[w++] = T[0]; arr[w++] = T[1]; arr[w++] = T[2]; arr[w++] = a;

@@ -189,12 +189,18 @@ export const CONFIG = {
     ],
   },
 
-  tunnel: {               // „Tunnel" = ECHTES 3D-Wurmloch: das Gitter selbst
-    r: 1.35,              // gleitet eine Trichterfläche hinab (Flamm-Ein-
-    tiefe: 4.0,           // bettung, renderformat.funnelProject). r = sicht-
-    weite: 3.0,           // barer Schlund-Ring (Zellen); tiefe = Trichter-
-    kameraH: 2.0,         // tiefe; weite = Reichweite der Raumkrümmung;
-    ringAlpha: 0.55,      // kameraH = virtuelle Kamerahöhe über der Fläche
+  p3d: {                  // ECHTES 3D: alles läuft durch eine Lochkamera in
+    hFac: 1.4,            // gelockter Draufsicht (Grundlook exakt unverändert,
+    dimm: 0.10,           // Perspektive sichtbar wo Tiefe ist). Kamerahöhe =
+    zMax: 26,             // hFac·Sichthöhe; dimm = Tiefen-Abdunklung (1/e je
+    neigung: 0.55,        // 1/dimm Zellen); neigung = Kippwinkel (rad) des
+  },                      // „frei"-Befehls (Perspektive entsperren)
+
+  tunnel: {               // „Tunnel" = ECHTES 3D-Wurmloch: unendlich tiefer
+    r: 2.2,               // Tubus im Gitter. r = Schlund-Radius (Zellen);
+    tiefe: 6.0,           // Einbettung z = tiefe·(weite/(d−r))^0.8 — je
+    weite: 2.5,           // größer weite, desto weiter reicht die Krümmung
+    ringAlpha: 0.55,      // feine Ringlinie am Schlundrand
     labelH: 0.34,         // Namens-Label (Zellen)
     dragMin: 10,          // px — mehr Bewegung = Verschieben statt Reise
     flugSec: 2.6,         // EIN kontinuierlicher Flug: rein → 180°-Z-Rolle

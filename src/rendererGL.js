@@ -41,7 +41,7 @@ void main() {
 
 // WURMLOCH-FAHRT (Post-Process): Sichtrolle um Z + ruhige radiale
 // Aberration. Die Raumkrümmung des Wurmlochs selbst ist ECHTES 3D im
-// Gitter (renderformat.funnelProject) — hier gibt es keine Linse mehr.
+// Gitter (renderformat.project3d) — hier gibt es keine Linse mehr.
 const FS_POST = `#version 300 es
 precision highp float;
 in vec2 v_uv;

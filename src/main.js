@@ -343,7 +343,13 @@ toggles.high.addEventListener('click', () => mode !== 'high' && setMode('high'))
     pre.textContent = JSON.stringify({
       selftest: world.selftest(),
       linse: world.store.linse,
-      funnel: world.store.funnel,
+      p3d: {
+        aktiv: world.store.p3d.aktiv,
+        hc: world.store.p3d.hc,
+        h0: world.store.p3d.h0,
+        tilt: world.store.p3d.tilt,
+        holes: world.store.p3d.holes,
+      },
       kamera: { cx: world.kamera.cx, cy: world.kamera.cy, scale: world.kamera.scale },
       dim: world.dirigent.dim,
       logoRow: rows,

@@ -89,16 +89,16 @@ Logo tritt beiseite, oben rechts sitzt der pinke Schließen-Agent
   (mockProvider sofort; fireflyProvider braucht Token-Proxy — Secret
   gehört nie in den Browser).
 - `tunnel`/`ordner` (`06A/06B`, src/dirigent.js): echtes 3D-Wurmloch —
-  das Gitter samt Netzlinien gleitet eine Trichterfläche hinab
-  (Flamm-Einbettung, perspektivisch von oben projiziert in
-  renderformat.funnelProject; KEINE Post-Process-Linse). Innerhalb des
-  Welt-Schlunds rs = r·(H+tiefe)/H ist die Welt „unten" → unsichtbar;
-  der sichtbare Ring (r) ist eine feine Linienrunde plus die dort
-  gestauten, schrumpfenden Kacheln. Drag verschiebt den Tunnel, Klick =
-  EIN kontinuierlicher Kameraflug in den Trichter mit 180°-Z-Rolle
-  (Post-FX nur Rolle + Aberration); Dimensionswechsel unsichtbar am
-  Scheitel, Ankunft als Ringwelle. Dimension 2 ist wärmer getönt
-  (store.baseTint) mit langsameren Wellen; Rückweg-Loch am selben Ort.
+  der Schlund ist ein unendlich tiefer Tubus in der 3D-Szene
+  (Einbettung z = tiefe·(weite/(d−r))^0.8, Tiefennebel zur
+  Hintergrundfarbe, Maler-Sortierung; KEINE Post-Process-Linse). Man
+  sieht echte Parallaxe: außerhalb der Bildmitte blickt man schräg auf
+  die Innenwand. Drag verschiebt den Tunnel, Klick = echter Kamerasturz:
+  die Kamerahöhe (p3d.hc) taucht durch die Oberfläche in den Tubus,
+  dabei 180°-Z-Rolle (Post-FX nur Rolle + Aberration); Dimensionswechsel
+  unsichtbar am tiefsten Punkt, Ankunft als Ringwelle. Dimension 2 ist
+  wärmer getönt (store.baseTint) mit langsameren Wellen; Rückweg-Loch am
+  selben Ort.
 
 ## Technik
 
@@ -107,6 +107,13 @@ Logo tritt beiseite, oben rechts sitzt der pinke Schließen-Agent
 - Renderer-Kaskade WebGPU → WebGL2 → Canvas2D (`?renderer=gl|2d` erzwingt).
   Gemeinsames Instanz-Packing in `src/renderformat.js` — Backends dürfen
   nie auseinanderdriften.
+- **Echtes 3D:** Der Schwarm lebt auf der Ebene z = 0 und läuft IMMER
+  durch eine echte Lochkamera (`renderformat.project3d`, Zustand in
+  `store.p3d`), gelockt senkrecht von oben — für flache Punkte exakt
+  identisch mit der direkten Abbildung, der Grundlook ändert sich also
+  nie. Tiefe (z > 0, z. B. Wurmloch-Tubus) zeigt echte Perspektive und
+  Parallaxe. Befehl `frei` entsperrt die Perspektive (geneigter Blick),
+  nochmal `frei` sperrt zurück; Apps erzwingen die Draufsicht.
 - Physik: CPU, fixe 120-Hz-Substeps; Struct-of-Arrays; schlafende Slots;
   gesettelte Pixel frieren ein (Early-Out).
 - Test-API im Browser: `__candy.selftest()`, `__candy.advance(sec)`;
