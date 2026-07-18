@@ -29,15 +29,21 @@ Diese Regeln sind verbindlich für alles, was in diesem Projekt entsteht.
 
 - **Rex verwaltet den Schwarm** und ist immer über das Claws-Icon oben rechts
   erreichbar (2 Kratzer = 2 Agenten, `assets/svg/claws.svg`).
-- **Klick auf die Claws:** Rex erhebt sich als lebendiges 3D-Käfig-
-  Drahtgitter aus dem Schwarm (`src/rex3d.js`, Modell
-  `assets/obj/rex.obj` samt gewölbter Squircle-Platte als nahtlosem
-  Übergang in den Schwarm). Zwei Catmull-Clark-Schritte glätten den
-  groben Käfig; gezeichnet werden NUR die Ur-Käfigkanten als weiche
-  4-Segment-Kurven (wie ein nicht angewandter Subsurface-Modifier).
-  Knoten = kleine runde Agenten, Kantensegmente = lang gestreckte
-  Agenten; die Drahtdicke wächst perspektivisch zur Kamera. Der Kopf
-  schaut dem Cursor nach. Esc oder Claws-Klick schickt Rex zurück.
+- **Klick auf die Claws:** Rex drückt sich als lebendiges 3D-Käfig-
+  Drahtgitter mit Kopf und Armen von hinten durch den Schwarm
+  (`src/rex3d.js`, Modell `assets/obj/rex.obj`; die mitmodellierte
+  Hintergrundplatte liegt auf der Schwarmebene und dient Orientierung
+  + weichem Übergang). Zwei Catmull-Clark-Schritte glätten den groben
+  Käfig; gezeichnet werden NUR die Ur-Käfigkanten als weiche,
+  durchgezogene 4-Segment-Kurven (wie ein nicht angewandter
+  Subsurface-Modifier), weiß und ~2px dick — Dicke wächst
+  perspektivisch zur Kamera. Die Gitteragenten UNTER Rex verdichten/
+  lockern sich auf die Eckpunktzahl des Käfigs (kreisrund, weiß, mit
+  dem Draht verschmolzen), fehlende Knoten kommen aus der Reserve; das
+  Schachbrett drumherum bleibt. Rex ist SCREEN-fest (zoomt nicht mit),
+  der Kopf (nicht die Platte!) schaut dem Cursor nach. Esc oder
+  Claws-Klick schickt ihn zurück — die Knoten lockern sich in den
+  Schwarm.
 - Rex' Intelligenz ist die Claude-API (`src/brain.js`, Key via „key"-Befehl,
   localStorage). Einzelne Agenten haben lokale, simulierte Autonomie und eine
   Identität (deterministischer Name aus der Agenten-Id, z. B. „Agent Vega 4000").
@@ -97,20 +103,19 @@ Logo tritt beiseite, oben rechts sitzt der pinke Schließen-Agent
   Startpunkt, lila „füllen"-Button → Prompt → Provider-Interface
   (mockProvider sofort; fireflyProvider braucht Token-Proxy — Secret
   gehört nie in den Browser).
-- `tunnel`/`ordner` (`06A/06B`, src/dirigent.js): echtes 3D-Wurmloch —
-  der Schlund ist ein unendlich tiefer Tubus in der 3D-Szene
-  (Einbettung z = tiefe·(weite/(d−r))^0.8, Tiefennebel zur
-  Hintergrundfarbe, Maler-Sortierung; KEINE Post-Process-Linse). Die
-  Agenten werden sichtbar hineingezogen und strecken sich dabei
-  anisotrop zu Bögen (Jacobian der Projektion → Instanz-aspect in den
-  Shadern); echte Parallaxe: außerhalb der Bildmitte blickt man schräg
-  auf die Innenwand. Drag verschiebt den Tunnel. Klick = die REISE, EINE
-  durchgehende Einstellung ohne Schnitt und ohne Dimensionswechsel: die
-  Kamerahöhe (p3d.hc) taucht durch die Oberfläche in die Röhre, der Sog
-  (tunnel.saug) zieht die umliegenden Agenten mit hinein, die Sicht
-  dreht kontinuierlich 180° um die Tunnelachse (Post-FX nur Drehung +
-  Aberration), und hinter dem Scheitel gibt die Röhre alles auf der
-  Rückseite wieder frei.
+- `tunnel`/`ordner` (Referenz `10_ordner_shader_wurmloch`,
+  src/dirigent.js): Schwarzes Loch — Welt-Warp um jedes Loch
+  (renderformat.lochWarp), überall exakt gleich, unabhängig von der
+  Kameraposition. Die umliegenden Kacheln rutschen auf den Ring zu,
+  krümmen sich tangential zu Bögen und bleiben IMMER außerhalb des
+  leeren Gap-Rings; das Innere ist IMMER komplett leer. Alles blendet
+  weich ein (h.st), nichts snappt. Drag verschiebt das Loch. Klick =
+  die REISE: die Kamera fliegt smooth hinein (der leere Schlund wächst
+  über den Schirm, die langgezogenen Agenten bleiben am äußeren Rand),
+  im Inneren dreht die WELT echt 180° um die vertikale Wurmloch-Achse
+  (project3d.yaw, kein Screen-Effekt), Ankunft auf der gegenüber-
+  liegenden Seite: die Agenten morphen aus dem Lochrand zurück, der
+  Schwarm justiert sich mit einer schnellen Welle (welleKick).
 
 ## Technik
 

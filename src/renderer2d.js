@@ -2,10 +2,11 @@
 // wenn weder WebGPU noch WebGL2 verfügbar sind. Gleiches Interface
 // { render(store, kamera), kind, dpr, dispose() } wie die GPU-Renderer.
 import { CONFIG } from './config.js';
-import { project3d, tiefeAt } from './renderformat.js';
+import { project3d, lochWarp } from './renderformat.js';
 import { STATE } from './swarm.js';
 
 const PJ = { x: 0, y: 0, k: 1, dim: 1, hidden: false };
+const LW = { x: 0, y: 0, f: 1, str: 1, rot: 0, blend: 0, hidden: false };
 
 export function createRenderer2D(canvas, view) {
   const dpr = Math.max(1, Math.min(2, Math.round(window.devicePixelRatio || 1)));
@@ -40,13 +41,17 @@ export function createRenderer2D(canvas, view) {
       let b = brightness[i];
       if (b <= 0.01) continue;
       let wx = posX[i], wy = posY[i], sz = size[i];
-      // dieselbe echte 3D-Lochkamera wie die GPU-Backends
-      // (Notfallback: ohne Maler-Sortierung)
+      // derselbe Schwarzes-Loch-Warp + 3D-Lochkamera wie die GPU-Backends
+      // (Notfallback: ohne Maler-Sortierung und ohne Streckung)
       let fog = 1;
       if (aktiv) {
-        const z = (i < latticeCount && state[i] <= STATE.RETURNING)
-          ? tiefeAt(P, wx, wy) : 0;
-        project3d(P, kamera, wx, wy, z, PJ);
+        if (P.holes.length > 0 && i < latticeCount && state[i] <= STATE.RETURNING) {
+          lochWarp(P, wx, wy, LW);
+          if (LW.hidden) continue;
+          wx = LW.x; wy = LW.y;
+          sz *= LW.f;
+        }
+        project3d(P, kamera, wx, wy, store.zPos[i], PJ);
         if (PJ.hidden) continue;
         wx = PJ.x; wy = PJ.y;
         sz *= PJ.k;

@@ -10,7 +10,7 @@
 // perspektivisch zur Kamera (project3d + Instanzgröße·k). Der Kopf
 // schaut dem Cursor nach.
 import { CONFIG } from './config.js';
-import { STATE, wakeAgent, allocReserve, CIRCLE } from './swarm.js';
+import { STATE, wakeAgent, allocReserve, setAgentShape, CIRCLE } from './swarm.js';
 import { project3d } from './renderformat.js';
 import { shapeId } from './formen.js';
 
@@ -160,7 +160,7 @@ function refine(polys, step) {
 }
 
 export function createRex3d(store, deps) {
-  const { kamera, registerTask, dissolveIds, cursor } = deps;
+  const { kamera, registerTask, dissolveIds, revert, cursor } = deps;
   const R = CONFIG.rex3d;
   let geo = null;        // { punkte: Float32Array(3n), polys, knoten, lade }
   let offen = false;
@@ -196,23 +196,29 @@ export function createRex3d(store, deps) {
       knoten = knoten.map((i) => step.vertIdx[i]);
       mesh = step;
     }
-    // Modell → Weltmaß: Platte (x/y-Ausdehnung) → R.breite Zellen,
-    // Plattenebene (größtes Modell-z) → Schwarmebene z = 0
-    let minX = 1e9, maxX = -1e9, maxZ = -1e9;
+    // Die Hintergrund-PLATTE liegt bei Modell-minZ und dient nur der
+    // Orientierung + dem weichen Übergang: sie kommt auf die Schwarm-
+    // ebene (z = 0), Rex' Kopf und Arme (großes Modell-z) drücken sich
+    // von hinten durch das Drahtgitter nach oben (Welt-z < 0).
+    let minX = 1e9, maxX = -1e9, minZ = 1e9;
     for (const v of cage.verts) {
       if (v[0] < minX) minX = v[0];
       if (v[0] > maxX) maxX = v[0];
-      if (v[2] > maxZ) maxZ = v[2];
+      if (v[2] < minZ) minZ = v[2];
     }
-    const s = R.breite / (maxX - minX);
     // Punkte in Modellkoordinaten behalten (Transform passiert je Frame)
-    geo = { mesh, polys, knoten, s, maxZ };
+    geo = { mesh, polys, knoten, spanX: maxX - minX, minZ };
   }
 
   // Geometrie schon beim Boot vorladen — der erste Klick baut sofort
   ladePromise = lade().catch(() => { ladePromise = null; });
 
+  const log = (m) => {
+    (window.__rexLog = window.__rexLog || []).push(m);
+  };
+
   function open(tNow) {
+    log(`open t=${tNow.toFixed(2)} geo=${!!geo}`);
     if (offen) return;
     offen = true;
     t0 = tNow;
@@ -225,70 +231,120 @@ export function createRex3d(store, deps) {
     baue();
   }
 
+  const WEISS = [236, 242, 239];
+
   function baue() {
-    const AG = store.baseTint;
     const nSeg = geo.polys.reduce((n, p) => n + p.length - 1, 0);
+    log(`baue nSeg=${nSeg} frei=${store.freeCount}`);
     segIds = [];
     knotIds = [];
+    // Kantensegmente: das weiße Drahtgitter (Reserve-Agenten)
     for (let k = 0; k < nSeg; k++) {
       const id = allocReserve(store, mitte.x, mitte.y);
       if (id < 0) break;
-      wakeAgent(store, id, t0, Math.random() * 0.9, {
+      wakeAgent(store, id, t0, Math.random() * 0.7, {
         size: 0.02, shape: shapeId('squircle'), taskId, swirl: true,
         px: mitte.x + (Math.random() - 0.5) * 10,
         py: mitte.y + (Math.random() - 0.5) * 8,
       });
       store.state[id] = STATE.TEXT;
-      store.tgtR[id] = store.colR[id] = AG[0] * R.briKante;
-      store.tgtG[id] = store.colG[id] = AG[1] * R.briKante;
-      store.tgtB[id] = store.colB[id] = AG[2] * R.briKante;
+      store.tgtR[id] = store.colR[id] = WEISS[0];
+      store.tgtG[id] = store.colG[id] = WEISS[1];
+      store.tgtB[id] = store.colB[id] = WEISS[2];
       segIds.push(id);
     }
-    for (let k = 0; k < geo.knoten.length; k++) {
+    // KNOTEN: die Gitteragenten UNTER Rex' Fläche verdichten/lockern
+    // sich auf die Eckpunktzahl des Käfigs (jeder übernimmt den ihm
+    // nächsten Eckpunkt — der Schwarm selbst wird Rex), fehlende
+    // Knoten kommen aus der Reserve; das Schachbrett drumherum bleibt
+    const s0 = (R.breitePx / kamera.scale) / geo.spanX;
+    const kPos = geo.knoten.map((ki) => {
+      const v = geo.mesh.verts[ki];
+      return { x: mitte.x + v[0] * s0, y: mitte.y - v[1] * s0, id: -1 };
+    });
+    const radius = (R.breitePx / kamera.scale) * 0.55;
+    const unter = [];
+    for (const i of store.carrierList) {
+      if (store.active[i] === 0 || store.state[i] > STATE.RETURNING) continue;
+      const dx = store.homeX[i] - mitte.x, dy = store.homeY[i] - mitte.y;
+      if (dx * dx + dy * dy < radius * radius) unter.push(i);
+    }
+    for (const i of unter) {
+      let best = -1, bestD = Infinity;
+      for (let k = 0; k < kPos.length; k++) {
+        if (kPos[k].id >= 0) continue;
+        const dx = kPos[k].x - store.homeX[i], dy = kPos[k].y - store.homeY[i];
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD) { bestD = d2; best = k; }
+      }
+      if (best < 0) break;
+      kPos[best].id = i;
+      store.state[i] = STATE.TEXT;
+      store.taskId[i] = taskId;
+      store.frozen[i] = 0;
+      setAgentShape(store, i, CIRCLE);
+      store.tgtR[i] = WEISS[0];
+      store.tgtG[i] = WEISS[1];
+      store.tgtB[i] = WEISS[2];
+    }
+    knotIds = kPos.map((p, k) => {
+      if (p.id >= 0) return { id: p.id, gitter: true };
       const id = allocReserve(store, mitte.x, mitte.y);
-      if (id < 0) break;
-      wakeAgent(store, id, t0, Math.random() * 0.9, {
+      if (id < 0) return null;
+      wakeAgent(store, id, t0, Math.random() * 0.7, {
         size: 0.02, shape: CIRCLE, taskId, swirl: true,
-        px: mitte.x + (Math.random() - 0.5) * 10,
-        py: mitte.y + (Math.random() - 0.5) * 8,
+        px: p.x + (Math.random() - 0.5) * 4,
+        py: p.y + (Math.random() - 0.5) * 4,
       });
       store.state[id] = STATE.TEXT;
-      store.tgtR[id] = store.colR[id] = AG[0] * R.briKnoten;
-      store.tgtG[id] = store.colG[id] = AG[1] * R.briKnoten;
-      store.tgtB[id] = store.colB[id] = AG[2] * R.briKnoten;
-      knotIds.push(id);
-    }
+      store.tgtR[id] = store.colR[id] = WEISS[0];
+      store.tgtG[id] = store.colG[id] = WEISS[1];
+      store.tgtB[id] = store.colB[id] = WEISS[2];
+      return { id, gitter: false };
+    }).filter(Boolean);
     store.needsRebuild = true;
+    log(`baue fertig segs=${segIds.length} knoten=${knotIds.length}`);
   }
 
   function close() {
     if (!offen) return;
+    log('close');
     offen = false;
     dissolveIds(segIds);
-    dissolveIds(knotIds);
-    for (const id of [...segIds, ...knotIds]) {
+    for (const id of segIds) {
       store.zPos[id] = 0;
       store.aspekt[id] = 1;
     }
+    // Gitter-Knoten lockern sich zurück in den Schwarm, Reserve löst auf
+    const reserveKnoten = [];
+    for (const kn of knotIds) {
+      store.zPos[kn.id] = 0;
+      store.aspekt[kn.id] = 1;
+      if (kn.gitter) revert(kn.id);
+      else reserveKnoten.push(kn.id);
+    }
+    dissolveIds(reserveKnoten);
     segIds = [];
     knotIds = [];
   }
 
-  // Modellpunkt → Welt (x, y, z<0 = über der Fläche), mit Kopf-Yaw
-  function welt(v, e, sinY, cosY, out) {
+  // Modellpunkt → Welt (x, y, z<0 = über der Fläche), mit Kopf-Yaw.
+  // s = Weltmaßstab (Rex ist SCREEN-fest: beim Zoomen immer gleich groß)
+  function welt(v, s, e, sinY, cosY, out) {
     let mx = v[0], my = v[1];
-    // Kopf = der zur Kamera ragende Teil (Modell-z klein): weich
-    // gewichtete Drehung um die Hochachse — Rex schaut dem Cursor nach
-    const w = Math.min(1, Math.max(0, (R.kopfZ - v[2]) / 0.9));
+    // KOPF und Arme = der nach oben ragende Teil (großes Modell-z):
+    // weich gewichtete Drehung um die Hochachse — Rex schaut dem Cursor
+    // nach; die Hintergrundplatte (kleines z) bleibt ruhig
+    const w = Math.min(1, Math.max(0, (v[2] - R.kopfAb) / R.kopfSpan));
     if (w > 0.001) {
       const cw = 1 + (cosY - 1) * w, sw = sinY * w;
       const rx = mx * cw - my * sw;
       my = mx * sw + my * cw;
       mx = rx;
     }
-    out.x = mitte.x + mx * geo.s;
-    out.y = mitte.y - my * geo.s;
-    out.z = (v[2] - geo.maxZ) * geo.s * e;
+    out.x = mitte.x + mx * s;
+    out.y = mitte.y - my * s;
+    out.z = -(v[2] - geo.minZ) * s * e; // durchdrücken: hebt sich mit e
     return out;
   }
 
@@ -300,6 +356,10 @@ export function createRex3d(store, deps) {
     const P = store.p3d;
     const glatt = (x) => x * x * (3 - 2 * x);
     const e = glatt(Math.min(1, (tNow - t0) / R.hebSec));
+    // Screen-feste Maße → Weltmaße bei aktuellem Zoom
+    const s = (R.breitePx / kamera.scale) / geo.spanX;
+    const dicke = R.dickePx / kamera.scale;
+    const knoten = R.knotenPx / kamera.scale;
     // der Kopf folgt dem Cursor — weich, nie snappend
     const zielYaw = cursor.active
       ? Math.max(-R.maxYaw, Math.min(R.maxYaw, (cursor.wx - mitte.x) * 0.09))
@@ -310,44 +370,46 @@ export function createRex3d(store, deps) {
     const verts = geo.mesh.verts;
     let sIdx = 0;
     for (const poly of geo.polys) {
-      welt(verts[poly[0]], e, sinY, cosY, W1);
+      welt(verts[poly[0]], s, e, sinY, cosY, W1);
       project3d(P, kamera, W1.x, W1.y, W1.z, PR);
       for (let k = 1; k < poly.length; k++) {
         const id = segIds[sIdx++];
         if (id === undefined) return;
-        welt(verts[poly[k]], e, sinY, cosY, W2);
+        welt(verts[poly[k]], s, e, sinY, cosY, W2);
         project3d(P, kamera, W2.x, W2.y, W2.z, PR2);
         if (PR.hidden || PR2.hidden) {
           store.sizeTgt[id] = 0;
         } else {
           // Agent = das Segment: Welt-Mitte + z; Länge/Winkel aus der
-          // Projektion → Dicke wächst zur Kamera (·k im Packing)
+          // Projektion → Dicke wächst zur Kamera (·k im Packing).
+          // Leichter Überstand (×1.3), damit die Linie DURCHGEZOGEN
+          // wirkt, nie gestrichelt
           const mx = (W1.x + W2.x) / 2, my = (W1.y + W2.y) / 2;
           store.homeX[id] = mx;
           store.homeY[id] = my;
           store.targetX[id] = mx;
           store.targetY[id] = my;
           store.zPos[id] = (W1.z + W2.z) / 2;
-          const len = Math.hypot(PR2.x - PR.x, PR2.y - PR.y);
+          const len = Math.hypot(PR2.x - PR.x, PR2.y - PR.y) * 1.3;
           const kMid = (PR.k + PR2.k) / 2;
-          store.sizeTgt[id] = R.dicke;
+          store.sizeTgt[id] = dicke;
           store.rot[id] = Math.atan2(PR2.y - PR.y, PR2.x - PR.x);
-          store.aspekt[id] = Math.max(0.2, len / Math.max(R.dicke * kMid, 1e-4));
+          store.aspekt[id] = Math.max(0.2, len / Math.max(dicke * kMid, 1e-4));
         }
         PR.x = PR2.x; PR.y = PR2.y; PR.k = PR2.k; PR.hidden = PR2.hidden;
         W1.x = W2.x; W1.y = W2.y; W1.z = W2.z;
       }
     }
     for (let k = 0; k < knotIds.length; k++) {
-      const id = knotIds[k];
+      const id = knotIds[k].id;
       const v = verts[geo.knoten[k]];
-      welt(v, e, sinY, cosY, W1);
+      welt(v, s, e, sinY, cosY, W1);
       store.homeX[id] = W1.x;
       store.homeY[id] = W1.y;
       store.targetX[id] = W1.x;
       store.targetY[id] = W1.y;
       store.zPos[id] = W1.z;
-      store.sizeTgt[id] = R.knoten;
+      store.sizeTgt[id] = knoten;
       store.aspekt[id] = 1;
     }
   }
@@ -356,5 +418,18 @@ export function createRex3d(store, deps) {
     open, close, update,
     toggle(tNow) { if (offen) close(); else open(tNow); },
     get isOpen() { return offen; },
+    debug() { // Headless-Diagnose
+      if (!segIds.length) return { segs: 0 };
+      const id = segIds[0], kid = knotIds[0] && knotIds[0].id;
+      const agent = (i) => i === undefined ? null : {
+        i, aktiv: store.active[i], st: store.state[i],
+        pos: [+store.posX[i].toFixed(2), +store.posY[i].toFixed(2)],
+        tgt: [+store.targetX[i].toFixed(2), +store.targetY[i].toFixed(2)],
+        size: +store.size[i].toFixed(3), sizeTgt: +store.sizeTgt[i].toFixed(3),
+        asp: +store.aspekt[i].toFixed(2), z: +store.zPos[i].toFixed(2),
+        bri: +store.brightness[i].toFixed(2),
+      };
+      return { segs: segIds.length, knoten: knotIds.length, seg0: agent(id), knot0: agent(kid) };
+    },
   };
 }

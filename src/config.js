@@ -197,28 +197,29 @@ export const CONFIG = {
   },                      // „frei"-Befehls (Perspektive entsperren)
 
   rex3d: {                // Rex als Käfig-Drahtgitter (assets/obj/rex.obj):
-    breite: 9,            // Plattenbreite in Zellen (Rex skaliert mit)
-    hebSec: 1.8,          // Erheben aus der Fläche
-    dicke: 0.055,         // Drahtdicke (Zellen) — wächst perspektivisch
-    knoten: 0.11,         // Größe der runden Knoten-Agenten
-    briKante: 0.9,        // Helligkeit Drahtgitter …
-    briKnoten: 1.05,      // … und Knoten
-    kopfZ: -0.5,          // Modell-z, ab dem der Kopf beginnt (Cursor-Blick)
-    maxYaw: 0.5,          // maximale Kopfdrehung (rad)
+    breitePx: 460,        // Plattenbreite in SCREEN-px — Rex bleibt beim
+    hebSec: 1.8,          // Zoomen des Schwarms immer gleich groß
+    dickePx: 2.2,         // Drahtdicke px (weiß, wächst perspektivisch)
+    knotenPx: 4.5,        // Knoten-Agenten px (kreisrund, verschmolzen)
+    kopfAb: 0.15,         // Modell-z, ab dem der Kopf beginnt …
+    kopfSpan: 0.7,        // … und wie weich er in den Körper übergeht
+    maxYaw: 0.5,          // maximale Kopfdrehung zum Cursor (rad)
   },
 
-  tunnel: {               // „Tunnel" = ECHTES 3D-Wurmloch: unendlich tiefer
-    r: 1.2,               // Tubus im Gitter. r = Schlund-Radius (Zellen);
-    tiefe: 4.5,           // Einbettung z = tiefe·(weite/(d−r))^0.8 — je
-    weite: 0.9,           // größer weite, desto weiter reicht die Krümmung
-    zieh: 2.8,            // Längs-Streckung der Agenten im Sog (Gezeiten)
-    wuchsSec: 1.4,        // der Trichter wächst weich ein (nie snappend)
-    ringAlpha: 0.55,      // feine Ringlinie am Schlundrand
+  tunnel: {               // „Tunnel" = Schwarzes Loch (Referenz 10): Welt-
+    r: 1.5,               // Warp, überall gleich. r = Ring; gap = leerer
+    gap: 0.45,            // Abstand Ring ↔ erste Bögen; reich = Krümmungs-
+    reich: 2.4,           // Reichweite jenseits des Gaps (Zellen);
+    kruemm: 2.6,          // Verdichtungs-Exponent am Ring;
+    bogen: 2.4,           // tangentiale Bogen-Streckung der ersten Reihe
+    wuchsSec: 1.4,        // das Loch wächst weich ein (nie snappend)
+    ringAlpha: 0.6,       // feine Ringlinie
     labelH: 0.30,         // Namens-Label (Zellen)
     dragMin: 10,          // px — mehr Bewegung = Verschieben statt Reise
-    flugSec: 2.6,         // EINE durchgehende Einstellung: durch die Röhre,
-    saug: 1.8,            //   180° um die Tunnelachse, kein Schnitt; saug =
-  },                      //   wie stark der Flug die Umgebung hineinzieht
+    flugSec: 2.6,         // Reise: Kamera fliegt smooth hinein, 180° echte
+    saug: 1.6,            //   3D-Drehung um die vertikale Achse, Ankunft
+    welleKick: 2.2,       //   mit schneller Justier-Welle; saug = Zusatz-
+  },                      //   Krümmung während des Flugs
 
   malen: {                // Paint (Referenz 05) — Offsets in Zellen vom Rahmen
     canvas: { dx: 2.3, dy: 2.5, w: 5.6, h: 3.5 }, // weiße Fläche (1px-Agenten)

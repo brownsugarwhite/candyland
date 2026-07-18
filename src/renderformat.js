@@ -25,25 +25,51 @@ export const INST_FLOATS = 12;
 // ist (kein Tunnel, keine Neigung, kein Flug), läuft der schnelle
 // Originalpfad ganz ohne Projektion.
 
-// Tiefe eines Flächenpunkts: Wurmloch-Einbettung z = tiefe·(weite/(d−r))^0.8
-// — unendlich tief am Schlundrand, kontinuierlich 0 am Reichweiten-Rand
-export function tiefeAt(P, x, y) {
-  let z = 0;
+// SCHWARZES LOCH (Referenz 10): Welt-Warp um jeden Tunnel — überall
+// exakt gleich, unabhängig von der Kameraposition. Die Kacheln rutschen
+// auf den Ring zu, verdichten sich, krümmen sich tangential zu Bögen
+// und bleiben IMMER außerhalb des leeren Gap-Rings; innen ist NICHTS.
+// h.st blendet den Warp weich ein (nie snappend).
+export function lochWarp(P, x, y, out) {
+  out.x = x; out.y = y; out.f = 1; out.str = 1;
+  out.rot = 0; out.blend = 0; out.hidden = false;
   const holes = P.holes;
   for (let k = 0; k < holes.length; k++) {
     const h = holes[k];
-    const dx = x - h.x, dy = y - h.y;
-    const d = Math.sqrt(dx * dx + dy * dy);
+    const dx = out.x - h.x, dy = out.y - h.y;
+    const d = Math.sqrt(dx * dx + dy * dy) || 1e-4;
     if (d >= h.reich) continue;
-    const a = d - h.r;
-    z += a <= 0.001 ? P.zMax : h.tiefe * Math.pow(h.weite / a, 0.8) - h.zOff;
+    if (d <= h.gapR) {
+      // verschluckt — das Innere ist immer komplett leer
+      out.f *= Math.max(0, 1 - h.st * 1.5);
+      if (out.f <= 0.02) { out.hidden = true; return out; }
+      continue;
+    }
+    const u = (d - h.gapR) / (h.reich - h.gapR); // 0 am Gap-Ring … 1 außen
+    const rp = h.gapR + (h.reich - h.gapR) * Math.pow(u, h.kruemm);
+    out.x += ((h.x + (dx / d) * rp) - out.x) * h.st;
+    out.y += ((h.y + (dy / d) * rp) - out.y) * h.st;
+    const nah = (1 - u) * h.st;
+    out.f *= 1 - 0.62 * nah * nah;         // zum Ring hin radial kleiner
+    const s = 1 + h.bogen * nah * nah;     // tangential zu Bögen gestreckt
+    if (s > out.str) {
+      out.str = s;
+      out.rot = Math.atan2(dy, dx) + Math.PI / 2; // Tangenten-Richtung
+      out.blend = Math.min(1, (s - 1) * 1.5);     // weiche Rotations-Blende
+    }
   }
-  if (z <= 0) return 0;
-  return z > P.zMax ? P.zMax : z;
+  return out;
 }
 
 // Lochkamera-Projektion → Pseudo-Welt; k = Größenfaktor, dim = Tiefenlicht
 export function project3d(P, kamera, x, y, z, out) {
+  // Wurmloch-Durchflug: ECHTE Drehung der Welt um die vertikale Achse
+  // durch das Loch (kein Screen-Effekt) — 0 → 180° während der Reise
+  if (P.yaw !== 0) {
+    const dxp = x - P.yawX, dyp = y - P.yawY;
+    x = P.yawX + dxp * P.cosYaw - dyp * P.sinYaw;
+    y = P.yawY + dxp * P.sinYaw + dyp * P.cosYaw;
+  }
   let rx = x - kamera.cx, ry = y - kamera.cy, rz = z;
   if (P.tilt !== 0) {
     const vy = P.cosT * ry - P.sinT * rz;
@@ -69,15 +95,8 @@ const PJ_B = { x: 0, y: 0, k: 1, dim: 1, hidden: false };
 // Schwarz) — dim = 1 obenauf, dim = 0 unten = unsichtbar vor dem Grund
 const FOG = hexToRgb01('#31353a');
 
-// Tiefe eines Agenten: eigene 3D-Höhe (zPos, z. B. Rex' Drahtgitter)
-// plus — für gebundene Gitteragenten — die Wurmloch-Einbettung
-function agentZ(P, store, i) {
-  const eigen = store.zPos[i];
-  if (i < store.latticeCount && store.state[i] <= STATE.RETURNING) {
-    return eigen + tiefeAt(P, store.posX[i], store.posY[i]);
-  }
-  return eigen;
-}
+const LW_A = { x: 0, y: 0, f: 1, str: 1, rot: 0, blend: 0, hidden: false };
+const LW_B = { x: 0, y: 0, f: 1, str: 1, rot: 0, blend: 0, hidden: false };
 
 // Aktive, sichtbare Agenten in arr packen (Kamera-Culling inklusive).
 // → Anzahl geschriebener Instanzen.
@@ -95,15 +114,15 @@ export function packInstances(store, kamera, arr) {
   const inv = 1 / 255;
   let w = 0;
 
-  // Maler-Reihenfolge: mit Tiefe wird fern → nah gezeichnet, damit die
-  // nähere Trichterwand die tiefere verdeckt
+  // Maler-Reihenfolge: mit Tiefe (zPos, z. B. Rex) wird fern → nah
+  // gezeichnet, damit Näheres Ferneres verdeckt
   let liste = null;
   if (aktiv) {
     liste = [];
     for (let kk = 0; kk < activeCount; kk++) {
       const i = activeList[kk];
       if (active[i] === 0) continue;
-      const z = agentZ(P, store, i);
+      const z = store.zPos[i];
       const rz = P.tilt !== 0 ? P.sinT * (posY[i] - cy) + P.cosT * z : z;
       liste.push({ i, z, dep: P.hc + rz });
     }
@@ -125,40 +144,23 @@ export function packInstances(store, kamera, arr) {
     let px = posX[i], py = posY[i], sz = size[i];
     let fog = 1, rotV = rot[i], aspect = aspekt[i];
     if (aktiv) {
-      project3d(P, kamera, px, py, z, PJ_A);
-      if (PJ_A.hidden) continue;
-      // ECHTE VERZERRUNG: der Sog zieht die Agenten LÄNGS ins Loch —
-      // sie strecken sich mit dem Gefälle der Raumfläche (Gezeitenkräfte)
-      // in Fallrichtung, tangential schrumpfen sie mit der Perspektive.
-      // Alles stetig: Streckung und Ausrichtung wachsen weich mit dem
-      // Gefälle, nie snappend.
-      if (z > 0.04 && P.holes.length > 0) {
-        let hx = 0, hy = 0, best = Infinity;
-        for (let q = 0; q < P.holes.length; q++) {
-          const h = P.holes[q];
-          const ddx = h.x - px, ddy = h.y - py;
-          const d2 = ddx * ddx + ddy * ddy;
-          if (d2 < best) { best = d2; hx = h.x; hy = h.y; }
-        }
-        const d = Math.sqrt(best) || 1e-3;
-        const dirx = (hx - px) / d, diry = (hy - py) / d;
-        const eps = 0.3;
-        const zIn = tiefeAt(P, px + dirx * eps, py + diry * eps);
-        const gefaelle = Math.max(0, (zIn - z) / eps); // dz Richtung Loch
-        const s = gefaelle / (gefaelle + 2);           // 0..1, weich
-        const ziel = 1 + P.zieh * s;                   // Länge der Streckung
-        // Fallrichtung im Bild (projiziert)
-        project3d(P, kamera, px + dirx * eps, py + diry * eps, zIn, PJ_B);
-        if (!PJ_B.hidden && ziel > 1.02) {
-          const jx = PJ_B.x - PJ_A.x, jy = PJ_B.y - PJ_A.y;
-          const zielRot = Math.atan2(jy, jx);
-          const wGl = Math.min(1, (ziel - 1) * 2); // weiche Rotations-Blende
-          let da = zielRot - rotV;
+      // Schwarzes-Loch-Warp (Weltebene) — nur gebundene Gitteragenten
+      if (P.holes.length > 0 && i < store.latticeCount &&
+          store.state[i] <= STATE.RETURNING) {
+        lochWarp(P, px, py, LW_A);
+        if (LW_A.hidden) continue;
+        px = LW_A.x;
+        py = LW_A.y;
+        sz *= LW_A.f;
+        if (LW_A.blend > 0.001) {
+          let da = LW_A.rot - rotV;
           da = Math.atan2(Math.sin(da), Math.cos(da));
-          rotV += da * wGl;
-          aspect *= ziel;
+          rotV += da * LW_A.blend;
+          aspect *= 1 + (LW_A.str - 1) * LW_A.blend;
         }
       }
+      project3d(P, kamera, px, py, z, PJ_A);
+      if (PJ_A.hidden) continue;
       px = PJ_A.x;
       py = PJ_A.y;
       sz *= PJ_A.k;
@@ -224,21 +226,22 @@ export function packLines(store, kamera, arr) {
       if (a > N.maxAlpha) a = N.maxAlpha;
       if (a < 0.012) continue;
       let x0 = posX[i], y0 = posY[i], x1 = posX[j], y1 = posY[j];
-      // das Raumnetz folgt der 3D-Fläche — SIE zeichnet den Tubus
+      // das Raumnetz krümmt sich mit ins Loch und folgt der 3D-Kamera
       if (aktiv) {
-        project3d(P, kamera, x0, y0, tiefeAt(P, x0, y0), PJ_A);
-        project3d(P, kamera, x1, y1, tiefeAt(P, x1, y1), PJ_B);
+        if (P.holes.length > 0) {
+          lochWarp(P, x0, y0, LW_A);
+          lochWarp(P, x1, y1, LW_B);
+          if (LW_A.hidden || LW_B.hidden) continue;
+          x0 = LW_A.x; y0 = LW_A.y; x1 = LW_B.x; y1 = LW_B.y;
+        }
+        project3d(P, kamera, x0, y0, 0, PJ_A);
+        project3d(P, kamera, x1, y1, 0, PJ_B);
         if (PJ_A.hidden || PJ_B.hidden) continue;
         x0 = PJ_A.x; y0 = PJ_A.y; x1 = PJ_B.x; y1 = PJ_B.y;
         // nahe der Near-Plane explodiert die Projektion — solche
         // extrem gestreckten Kanten fächern hässlich: weglassen
         const pdx = x1 - x0, pdy = y1 - y0;
         if (pdx * pdx + pdy * pdy > 40) continue;
-        // das Raumnetz GLÜHT im Tubus (Referenzbild) — es dimmt mit der
-        // Tiefe nur sanft, während die Kacheln im Nebel versinken
-        const tiefe = 1 - Math.min(PJ_A.dim, PJ_B.dim);
-        const glut = Math.max(PJ_A.dim, PJ_B.dim);
-        a = Math.min(0.5, a + 0.4 * tiefe) * (0.35 + 0.65 * glut);
       }
       arr[w++] = x0; arr[w++] = y0;
       arr[w++] = T[0]; arr[w++] = T[1]; arr[w++] = T[2]; arr[w++] = a;

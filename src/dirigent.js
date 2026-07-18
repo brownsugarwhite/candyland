@@ -177,6 +177,7 @@ export function createDirigent(store, kamera) {
   const rex3d = createRex3d(store, {
     kamera, registerTask, cursor,
     dissolveIds: (ids) => dissolveIds(ids),
+    revert: (id) => revert(id),
   });
   const auswahl = createAuswahl(store, logo);
 
@@ -498,17 +499,16 @@ export function createDirigent(store, kamera) {
   // aber der Schlund ist ein unendlich tiefer Tubus mit echter Perspektive
   // und Parallaxe. Hier leben Platzierung (Drag), Label + Dreiecks-Marker,
   // die Perspektiven-Entsperrung („frei") und die REISE: eine einzige
-  // durchgehende Einstellung — die Kamerahöhe taucht WIRKLICH durch die
-  // Oberfläche (diveHc), der Sog (reiseSaug) zieht die Schwarmagenten
-  // mit in die Röhre, die Sicht dreht 180° um die Tunnelachse.
+  // durchgehende Einstellung — die Kamera fliegt smooth ins leere
+  // Innere, die Welt dreht ECHT 180° um die vertikale Wurmloch-Achse
+  // (project3d.yaw), Ankunft mit schneller Justier-Welle.
   const dimHoles = [[], []];
   let dim = 0;
   let reise = null;      // { t0, hole, scale0, cx0, cy0 }
   let holeDrag = null;   // { hole, lastX, lastY, movedPx }
-  let reiseRot = 0;      // Drehung um die Tunnelachse (0..π)
+  let reiseYaw = 0;      // ECHTE Drehung um die vertikale Achse (0..π)
   let reiseSmear = 0;    // ruhige radiale Aberration
   let reiseSaug = 0;     // 0..1 — der Tunnel saugt die Umgebung hinein
-  let diveHc = null;     // Kamerahöhe während des Flugs (sonst Ruhehöhe)
   // Kameramodi: 'top' = gelockte perspektivische Draufsicht (Default),
   // '2d' = echte Orthografie, 'iso' = isometrisch, 'frei' = geneigt
   let ansicht = 'top';
@@ -634,40 +634,46 @@ export function createDirigent(store, kamera) {
     const T = CONFIG.tunnel;
     const H = reise.hole;
     const glatt = (p) => p * p * (3 - 2 * p);
-    // EINE durchgehende Einstellung, kein Schnitt, kein Dimensionswechsel:
-    // die Kamera gleitet über den Schlund, ihre Höhe taucht durch die
-    // Oberfläche in die Röhre. Der Tunnel SAUGT dabei die Schwarmagenten
-    // der Vorderseite mit hinein (der Sog vertieft die Einbettung — sie
-    // rutschen sichtbar ins Loch und strecken sich zu Bögen), die Sicht
-    // dreht kontinuierlich 180° um die Tunnelachse, und hinter dem
-    // Scheitel gibt die Röhre alles auf der Rückseite wieder frei.
+    // EINE durchgehende Einstellung: die Kamera fliegt smooth in das
+    // Loch (der leere Schlund wächst über den Schirm, die langgezogenen
+    // Agenten bleiben immer am äußeren Rand), im Inneren dreht die Welt
+    // ECHT 180° um die vertikale Wurmloch-Achse (project3d.yaw), und die
+    // Kamera kommt perfekt positioniert auf der gegenüberliegenden
+    // Seite wieder heraus.
     const p = Math.min(1, (t - reise.t0) / T.flugSec);
     const anflug = glatt(Math.min(1, p * 2.2));
+    // Zoom-Kurve: rein … Scheitel (Schlund umschließt den Schirm) … raus
+    const halfDiag = Math.hypot(kamera.viewW, kamera.viewH) / 2;
+    const zoomMax = (halfDiag * 1.5) / H.r;
+    const dreieck = 1 - Math.abs(1 - 2 * p);
+    const zk = glatt(Math.min(1, dreieck * 1.12));
     kamera.setView(
       reise.cx0 + (H.x - reise.cx0) * anflug,
       reise.cy0 + (H.y - reise.cy0) * anflug,
-      reise.scale0,
+      reise.scale0 * Math.pow(zoomMax / reise.scale0, zk),
     );
-    const h0 = (kamera.viewH / kamera.scale) * CONFIG.p3d.hFac;
-    const zTief = CONFIG.p3d.zMax * 0.85;
-    const dreieck = 1 - Math.abs(1 - 2 * p); // rein … Scheitel … raus
-    // erst anfliegen, DANN stürzen — sonst taucht die Kamera ab,
-    // bevor sie über dem Schlund steht
-    const sturz = glatt(Math.max(0, (dreieck - 0.14) / 0.86));
-    diveHc = h0 - (h0 + zTief) * sturz;
     reiseSaug = Math.sin(Math.PI * p); // Sog schwillt an und wieder ab
-    // Drehung um die Tunnelachse: kontinuierlich 0 → 180°
-    reiseRot = Math.PI * glatt(p);
-    reiseSmear = Math.sin(Math.PI * p) * 0.55;
+    reiseYaw = Math.PI * glatt(p);     // echte Drehung um die Hochachse
+    reiseSmear = Math.sin(Math.PI * p) * 0.45;
     if (p >= 1) {
       // 180° im Schachbrett = deckungsgleich → Drehung unsichtbar lösen
-      reiseRot = 0;
+      reiseYaw = 0;
       reiseSmear = 0;
       reiseSaug = 0;
-      diveHc = null;
       kamera.snapClamped(reise.scale0);
       reise = null;
       formHoleLabel(H);
+      // Ankunft: die Agenten morphen aus dem Lochrand zurück — mit
+      // einer schnellen wellenartigen Justier-Bewegung
+      for (const i of store.carrierList) {
+        if (store.state[i] > STATE.RETURNING || store.active[i] === 0) continue;
+        const dx = store.homeX[i] - H.x, dy = store.homeY[i] - H.y;
+        const d = Math.hypot(dx, dy) || 1e-3;
+        if (d > 9) continue;
+        const kick = T.welleKick * Math.exp(-d / 3.5);
+        store.velX[i] += (dx / d) * kick;
+        store.velY[i] += (dy / d) * kick;
+      }
     }
   }
 
@@ -693,7 +699,7 @@ export function createDirigent(store, kamera) {
   function linseUpdate(t, dt) {
     const L = store.linse;
     L.holes.length = 0;
-    L.rot = reiseRot;
+    L.rot = 0; // die Drehung ist ECHT (project3d.yaw), kein Screen-Effekt
     L.smear = reiseSmear;
     L.tcx = kamera.viewW / 2;
     L.tcy = kamera.viewH / 2;
@@ -703,36 +709,40 @@ export function createDirigent(store, kamera) {
     const P = store.p3d;
     P.holes.length = 0;
     const sichtbar = activeApp ? [] : (reise ? [reise.hole] : dimHoles[dim]);
-    // der Sog des Flugs vertieft und weitet die Einbettung — die
-    // Schwarmagenten der Umgebung rutschen sichtbar mit in die Röhre
+    // der Sog des Flugs verstärkt Krümmung und Reichweite — die
+    // umliegenden Agenten werden langgezogen und ins Loch gezogen,
+    // bleiben aber IMMER am äußeren Rand (Schwarzes-Loch-Prinzip)
     const glatt = (x) => x * x * (3 - 2 * x);
-    const tiefeBasis = T.tiefe * (1 + reiseSaug * T.saug);
-    const weite = T.weite * (1 + reiseSaug * T.saug * 0.5);
     for (const h of sichtbar) {
-      // jeder Trichter wächst weich ein — nie snappend
+      // jedes Loch wächst weich ein — nie snappend
       const st = glatt(Math.min(1, (t - (h.born || 0)) / T.wuchsSec));
       if (st <= 0.001) continue;
-      const tiefe = tiefeBasis * st;
-      const reich = h.r + weite * 4;
       P.holes.push({
-        x: h.x, y: h.y, r: h.r, tiefe, weite, reich,
-        zOff: tiefe * Math.pow(weite / (reich - h.r), 0.8),
+        x: h.x, y: h.y, r: h.r, st,
+        gapR: h.r + T.gap,
+        reich: h.r + T.gap + T.reich * (1 + reiseSaug * T.saug),
+        kruemm: T.kruemm * (1 + reiseSaug * T.saug),
+        bogen: T.bogen * (1 + reiseSaug * T.saug),
       });
     }
-    P.zieh = T.zieh;
+    // Reise: echte 3D-Drehung der Welt um die vertikale Wurmloch-Achse
+    P.yaw = reiseYaw;
+    if (reise) { P.yawX = reise.hole.x; P.yawY = reise.hole.y; }
+    P.sinYaw = Math.sin(reiseYaw);
+    P.cosYaw = Math.cos(reiseYaw);
     tiltCur += (tiltTgt - tiltCur) * Math.min(1, 5 * dt);
     if (Math.abs(tiltCur) < 0.002 && tiltTgt === 0) tiltCur = 0;
     orthoCur += (orthoTgt - orthoCur) * Math.min(1, 5 * dt);
     if (orthoCur < 0.002 && orthoTgt === 0) orthoCur = 0;
     P.h0 = (kamera.viewH / kamera.scale) * CONFIG.p3d.hFac;
-    P.hc = diveHc !== null ? diveHc : P.h0;
+    P.hc = P.h0;
     P.tilt = tiltCur;
     P.sinT = Math.sin(tiltCur);
     P.cosT = Math.cos(tiltCur);
     P.ortho = orthoCur;
     P.zMax = CONFIG.p3d.zMax;
     P.dimm = CONFIG.p3d.dimm;
-    P.aktiv = P.holes.length > 0 || tiltCur !== 0 || diveHc !== null ||
+    P.aktiv = P.holes.length > 0 || tiltCur !== 0 || reiseYaw !== 0 ||
       rex3d.isOpen;
     for (const h of sichtbar) ringLines(h);
   }
@@ -970,6 +980,7 @@ export function createDirigent(store, kamera) {
     },
     get holes() { return store.p3d.holes; }, // Tunnel (nur Diagnose)
     get dim() { return dim; },
+    get rexDebug() { return rex3d.debug(); },
     get brainBusy() { return brainBusy; },
     agentName, taskLines,
     notifyAction,

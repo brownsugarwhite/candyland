@@ -19,6 +19,26 @@ const canvas = document.getElementById('feld');
 const hud = createHud();
 const params = new URLSearchParams(location.search);
 
+// Headless-Diagnose: Laufzeitfehler landen sichtbar im DOM (#fehler)
+window.addEventListener('error', (e) => {
+  let el = document.getElementById('fehler');
+  if (!el) {
+    el = document.createElement('pre');
+    el.id = 'fehler';
+    document.body.appendChild(el);
+  }
+  el.textContent += `${e.message} @ ${e.filename}:${e.lineno}\n`;
+});
+window.addEventListener('unhandledrejection', (e) => {
+  let el = document.getElementById('fehler');
+  if (!el) {
+    el = document.createElement('pre');
+    el.id = 'fehler';
+    document.body.appendChild(el);
+  }
+  el.textContent += `promise: ${e.reason && e.reason.stack || e.reason}\n`;
+});
+
 let world = null; // { store, kamera, dirigent, renderer, wellen, detach, raf, tSim }
 
 async function createRenderer(view) {
@@ -352,6 +372,8 @@ toggles.high.addEventListener('click', () => mode !== 'high' && setMode('high'))
       },
       kamera: { cx: world.kamera.cx, cy: world.kamera.cy, scale: world.kamera.scale },
       dim: world.dirigent.dim,
+      rex: world.dirigent.rexDebug,
+      rexLog: window.__rexLog || null,
       logoRow: rows,
       cells,
     }, null, 1);

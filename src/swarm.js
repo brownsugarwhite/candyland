@@ -81,7 +81,8 @@ export function createSwarm(gitter, defaultShape, tNow = 0) {
   store.p3d = { // echte 3D-Lochkamera (renderformat.project3d)
     aktiv: false, holes: [],
     hc: 1, h0: 1, tilt: 0, sinT: 0, cosT: 1,
-    ortho: 0, zieh: 2.8, zMax: 26, dimm: 0.12,
+    yaw: 0, yawX: 0, yawY: 0, sinYaw: 0, cosYaw: 1,
+    ortho: 0, zMax: 26, dimm: 0.12,
   };
   // ECHTES 3D für jeden Agenten: Höhe über der Fläche (zPos < 0 = oben)
   // und anisotrope Streckung entlang der eigenen rot-Achse
