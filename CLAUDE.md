@@ -88,10 +88,16 @@ Logo tritt beiseite, oben rechts sitzt der pinke Schließen-Agent
   Startpunkt, lila „füllen"-Button → Prompt → Provider-Interface
   (mockProvider sofort; fireflyProvider braucht Token-Proxy — Secret
   gehört nie in den Browser).
-- `ordner` (`06A/06B`, in src/dirigent.js): Ordner = kreisrundes Loch im
-  Netz (Warp in swarm.postStep, env.holes). Klick hinein: Sog-Spirale
-  (suckSec) → Dimensionswechsel mit Kreis-Inversion (Umstülpung, ferne
-  Agenten erscheinen innen) → Entfaltung. Dimension 2 ist wärmer getönt
+- `tunnel`/`ordner` (`06A/06B`, src/dirigent.js): echtes 3D-Wurmloch —
+  das Gitter samt Netzlinien gleitet eine Trichterfläche hinab
+  (Flamm-Einbettung, perspektivisch von oben projiziert in
+  renderformat.funnelProject; KEINE Post-Process-Linse). Innerhalb des
+  Welt-Schlunds rs = r·(H+tiefe)/H ist die Welt „unten" → unsichtbar;
+  der sichtbare Ring (r) ist eine feine Linienrunde plus die dort
+  gestauten, schrumpfenden Kacheln. Drag verschiebt den Tunnel, Klick =
+  EIN kontinuierlicher Kameraflug in den Trichter mit 180°-Z-Rolle
+  (Post-FX nur Rolle + Aberration); Dimensionswechsel unsichtbar am
+  Scheitel, Ankunft als Ringwelle. Dimension 2 ist wärmer getönt
   (store.baseTint) mit langsameren Wellen; Rückweg-Loch am selben Ort.
 
 ## Technik

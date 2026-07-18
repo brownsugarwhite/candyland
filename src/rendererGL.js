@@ -39,24 +39,15 @@ void main() {
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
-// GRAVITATIONSLINSE + WURMLOCH-FAHRT (Post-Process).
-// Physik: Punktmassen-Linsengleichung β = θ − θE²/θ — Hintergrund-Kacheln
-// werden außerhalb des Einstein-Radius θE zu tangentialen Bögen verzerrt
-// (leichte chromatische Aberration wie bei echter Lichtablenkung).
-// Innerhalb θE: Ereignishorizont (radialer dunkler Schleier), Ring-Glow.
-// Die Fahrt (u_fx.x) streckt das echte Szenenlicht radial nach vorn
-// (relativistische Aberration) und legt prozedurale Sternstreifen darüber.
+// WURMLOCH-FAHRT (Post-Process): Sichtrolle um Z + ruhige radiale
+// Aberration. Die Raumkrümmung des Wurmlochs selbst ist ECHTES 3D im
+// Gitter (renderformat.funnelProject) — hier gibt es keine Linse mehr.
 const FS_POST = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 uniform sampler2D u_scene;
 uniform vec2 u_view;
-uniform vec4 u_holes[4]; // sx, sy, thetaE(px), aktiv
 uniform vec4 u_fx;       // rotWinkel, tcx, tcy, smear
-uniform vec3 u_ringCol;
-uniform vec3 u_par;      // horizonFrac, lenseReich, ringGlow
-uniform vec3 u_bgInner;
-uniform vec3 u_bgOuter;
 out vec4 outColor;
 
 // Screen-Koordinaten laufen oben-links los; GL-Texturen unten-links —
@@ -66,18 +57,11 @@ vec3 szene(vec2 px) {
   return texture(u_scene, clamp(uv, vec2(0.001), vec2(0.999))).rgb;
 }
 
-// Hintergrundfarbe an einer Screen-Position (wie der Bg-Pass)
-vec3 hintergrund(vec2 px) {
-  vec2 d = px - u_view * 0.5;
-  float r = length(d) / (0.55 * length(u_view));
-  return mix(u_bgInner, u_bgOuter, smoothstep(0.15, 1.0, r));
-}
-
 void main() {
   // sichtbarer Bereich des Fullscreen-Dreiecks: v_uv ∈ 0..1
   vec2 px = vec2(v_uv.x, 1.0 - v_uv.y) * u_view;
 
-  // Durchflug: die ganze Sicht ROLLT um die Bildmitte (2×180°)
+  // Durchflug: die ganze Sicht ROLLT um die Bildmitte (0 → 180°)
   float rot = u_fx.x;
   if (abs(rot) > 0.0005) {
     vec2 c = u_fx.yz;
@@ -86,42 +70,7 @@ void main() {
     px = c + vec2(rel.x * cs - rel.y * sn, rel.x * sn + rel.y * cs);
   }
 
-  float veil = 1.0;
-  float bgMix = 0.0;
-  float ring = 0.0;
-
-  // Linsen-Remap (Rot/Grün/Blau minimal verschieden → Aberration)
-  vec2 pR = px;
-  vec2 pG = px;
-  vec2 pB = px;
-  for (int i = 0; i < 4; i++) {
-    vec4 h = u_holes[i];
-    if (h.w < 0.5) continue;
-    vec2 rel = px - h.xy;
-    float d = max(length(rel), 1e-3);
-    float tE = h.z;
-    if (d < tE) {
-      // Ereignishorizont: innen ruhig und dunkel (Label bleibt lesbar)
-      veil *= 0.9; // innen kaum abdunkeln — flach, ohne Verlauf
-    } else if (d < tE * u_par.y) {
-      float fall = 1.0 - smoothstep(tE * (u_par.y * 0.7), tE * u_par.y, d);
-      vec2 dir = rel / d;
-      float dR = d - (tE * tE * 0.985 * 0.985) / d;
-      float dG = d - (tE * tE) / d;
-      float dB = d - (tE * tE * 1.015 * 1.015) / d;
-      pR = mix(pR, h.xy + dir * dR, fall);
-      pG = mix(pG, h.xy + dir * dG, fall);
-      pB = mix(pB, h.xy + dir * dB, fall);
-      // Strahlen aus dem Lochinneren zeigen den HIMMEL dahinter —
-      // kein Schatten, keine gekrümmten Zweitbilder von Label/Pfeil
-      bgMix = max(bgMix, 1.0 - smoothstep(tE * 0.92, tE * 1.01, dG));
-    }
-    float rd = abs(d - tE);
-    ring += u_par.z * exp(-rd * rd / 3.0); // feine Linie, kein Halo
-  }
-  vec3 col = vec3(szene(pR).r, szene(pG).g, szene(pB).b) * veil;
-  col = mix(col, hintergrund(px), bgMix);
-  col += u_ringCol * ring;
+  vec3 col = szene(px);
 
   // ruhige radiale Aberration während des Durchflugs (kein Geflacker)
   float sm = u_fx.w;
@@ -284,19 +233,8 @@ export function createRendererGL(canvas, view) {
   gl.useProgram(progPost);
   gl.uniform1i(gl.getUniformLocation(progPost, 'u_scene'), 1);
   gl.uniform2f(gl.getUniformLocation(progPost, 'u_view'), view.w, view.h);
-  gl.uniform3f(gl.getUniformLocation(progPost, 'u_ringCol'), 0.72, 0.79, 0.76);
-  gl.uniform3f(gl.getUniformLocation(progPost, 'u_par'),
-    CONFIG.tunnel.horizon, CONFIG.tunnel.lense, CONFIG.tunnel.ringGlow);
-  {
-    const bi = hexToRgb01(CONFIG.colors.bgInner);
-    const bo = hexToRgb01(CONFIG.colors.bgOuter);
-    gl.uniform3f(gl.getUniformLocation(progPost, 'u_bgInner'), bi[0], bi[1], bi[2]);
-    gl.uniform3f(gl.getUniformLocation(progPost, 'u_bgOuter'), bo[0], bo[1], bo[2]);
-  }
-  const uHoles = gl.getUniformLocation(progPost, 'u_holes');
   const uFx = gl.getUniformLocation(progPost, 'u_fx');
   const vaoPost = gl.createVertexArray();
-  const holeArr = new Float32Array(16);
 
   const formen = formenInfo();
   let atlasVersion = -1;
@@ -411,19 +349,11 @@ export function createRendererGL(canvas, view) {
       gl.drawArrays(gl.LINES, ln.nMesh, ln.nTotal - ln.nMesh);
     }
 
-    // Post-Process: Gravitationslinse + Wurmloch-Fahrt auf den Screen
+    // Post-Process: Wurmloch-Fahrt (Rolle + Aberration) auf den Screen
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, view.w * dpr, view.h * dpr);
-    const L = store.linse || { holes: [], tunnelT: 0, tcx: 0, tcy: 0, zeit: 0 };
-    holeArr.fill(0);
-    for (let i = 0; i < Math.min(4, L.holes.length); i++) {
-      holeArr[i * 4] = L.holes[i].sx;
-      holeArr[i * 4 + 1] = L.holes[i].sy;
-      holeArr[i * 4 + 2] = L.holes[i].thetaE;
-      holeArr[i * 4 + 3] = 1;
-    }
+    const L = store.linse || { rot: 0, tcx: 0, tcy: 0, smear: 0 };
     gl.useProgram(progPost);
-    gl.uniform4fv(uHoles, holeArr);
     gl.uniform4f(uFx, L.rot || 0, L.tcx, L.tcy, L.smear || 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, sceneTex);

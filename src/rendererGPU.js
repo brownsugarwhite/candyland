@@ -96,17 +96,13 @@ struct LOut { @builtin(position) pos: vec4f, @location(0) col: vec4f };
   return vec4f(in.col.rgb * in.col.a, in.col.a);
 }
 
-// ---- Post-Process: Gravitationslinse + Wurmloch-Fahrt ------------------
-// Physik: Punktmassen-Linsengleichung β = θ − θE²/θ (Bögen außerhalb des
-// Einstein-Radius, chromatische Aberration), innen Ereignishorizont.
-// Die Fahrt streckt das Szenenlicht radial (Aberration) + Sternstreifen.
-struct Linse {
-  holes: array<vec4f, 4>, // sx, sy, thetaE, aktiv
-  fx: vec4f,              // rotWinkel, tcx, tcy, smear
-  par: vec4f,             // horizonFrac, lenseReich, ringGlow, –
-  ringCol: vec4f,
+// ---- Post-Process: Wurmloch-Fahrt (Rolle + Aberration) -----------------
+// Die Raumkrümmung des Wurmlochs selbst ist ECHTES 3D im Gitter
+// (renderformat.funnelProject) — hier gibt es keine Linse mehr.
+struct Fahrt {
+  fx: vec4f, // rotWinkel, tcx, tcy, smear
 };
-@group(1) @binding(0) var<uniform> linse: Linse;
+@group(1) @binding(0) var<uniform> linse: Fahrt;
 @group(1) @binding(1) var sceneTex: texture_2d<f32>;
 @group(1) @binding(2) var sceneSamp: sampler;
 
@@ -125,17 +121,11 @@ fn szene(px: vec2f) -> vec3f {
     clamp(px / cam.view, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
 }
 
-fn hintergrund(px: vec2f) -> vec3f {
-  let d = px - cam.view * 0.5;
-  let r = length(d) / (0.55 * length(cam.view));
-  return mix(cam.inner.rgb, cam.outer.rgb, smoothstep(0.15, 1.0, r));
-}
-
 @fragment fn fsPost(in: PostOut) -> @location(0) vec4f {
   // sichtbarer Bereich des Fullscreen-Dreiecks: uv ∈ 0..1
   var px = in.uv * cam.view;
 
-  // Durchflug: die ganze Sicht ROLLT um die Bildmitte (2×180°)
+  // Durchflug: die ganze Sicht ROLLT um die Bildmitte (0 → 180°)
   let rot = linse.fx.x;
   if (abs(rot) > 0.0005) {
     let c = linse.fx.yz;
@@ -145,39 +135,7 @@ fn hintergrund(px: vec2f) -> vec3f {
     px = c + vec2f(rel.x * cs - rel.y * sn, rel.x * sn + rel.y * cs);
   }
 
-  var veil = 1.0;
-  var bgMix = 0.0;
-  var ring = 0.0;
-  var pR = px;
-  var pG = px;
-  var pB = px;
-  for (var i = 0; i < 4; i++) {
-    let h = linse.holes[i];
-    if (h.w < 0.5) { continue; }
-    let rel = px - h.xy;
-    let d = max(length(rel), 1e-3);
-    let tE = h.z;
-    if (d < tE) {
-      veil *= 0.9; // innen kaum abdunkeln — flach, ohne Verlauf
-    } else if (d < tE * linse.par.y) {
-      let fall = 1.0 - smoothstep(tE * (linse.par.y * 0.7), tE * linse.par.y, d);
-      let dir = rel / d;
-      let dR = d - (tE * tE * 0.970225) / d;
-      let dG = d - (tE * tE) / d;
-      let dB = d - (tE * tE * 1.030225) / d;
-      pR = mix(pR, h.xy + dir * dR, fall);
-      pG = mix(pG, h.xy + dir * dG, fall);
-      pB = mix(pB, h.xy + dir * dB, fall);
-      // Strahlen aus dem Lochinneren zeigen den HIMMEL dahinter —
-      // kein Schatten, keine gekrümmten Zweitbilder von Label/Pfeil
-      bgMix = max(bgMix, 1.0 - smoothstep(tE * 0.92, tE * 1.01, dG));
-    }
-    let rd = abs(d - tE);
-    ring += linse.par.z * exp(-rd * rd / 3.0); // feine Linie, kein Halo
-  }
-  var col = vec3f(szene(pR).r, szene(pG).g, szene(pB).b) * veil;
-  col = mix(col, hintergrund(px), bgMix);
-  col += linse.ringCol.rgb * ring;
+  var col = szene(px);
 
   // ruhige radiale Aberration während des Durchflugs (kein Geflacker)
   let sm = linse.fx.w;
@@ -335,7 +293,7 @@ export async function createRendererGPU(canvas, view) {
   let bindGroup = makeBindGroup();
 
   const linseBuf = device.createBuffer({
-    size: 16 * 4 + 3 * 16,
+    size: 16, // Fahrt: eine vec4f (rot, tcx, tcy, smear)
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
   const layoutPost = device.createBindGroupLayout({
@@ -384,9 +342,7 @@ export async function createRendererGPU(canvas, view) {
     fragment: { module, entryPoint: 'fsPost', targets: [{ format }] },
     primitive: { topology: 'triangle-list' },
   });
-  const linseData = new Float32Array(28);
-  linseData.set([CONFIG.tunnel.horizon, CONFIG.tunnel.lense, CONFIG.tunnel.ringGlow, 0], 20);
-  linseData.set([0.72, 0.79, 0.76, 1], 24);
+  const linseData = new Float32Array(4);
 
   const inner = hexToRgb01(CONFIG.colors.bgInner);
   const outer = hexToRgb01(CONFIG.colors.bgOuter);
@@ -438,18 +394,11 @@ export async function createRendererGPU(canvas, view) {
       device.queue.writeBuffer(lineBuf, 0, lnArr, 0, ln.nTotal * LINE_FLOATS);
     }
 
-    const L = store.linse || { holes: [], tunnelT: 0, tcx: 0, tcy: 0, zeit: 0 };
-    linseData.fill(0, 0, 16);
-    for (let i = 0; i < Math.min(4, L.holes.length); i++) {
-      linseData[i * 4] = L.holes[i].sx;
-      linseData[i * 4 + 1] = L.holes[i].sy;
-      linseData[i * 4 + 2] = L.holes[i].thetaE;
-      linseData[i * 4 + 3] = 1;
-    }
-    linseData[16] = L.rot || 0;
-    linseData[17] = L.tcx;
-    linseData[18] = L.tcy;
-    linseData[19] = L.smear || 0;
+    const L = store.linse || { rot: 0, tcx: 0, tcy: 0, smear: 0 };
+    linseData[0] = L.rot || 0;
+    linseData[1] = L.tcx;
+    linseData[2] = L.tcy;
+    linseData[3] = L.smear || 0;
     device.queue.writeBuffer(linseBuf, 0, linseData);
 
     const enc = device.createCommandEncoder();

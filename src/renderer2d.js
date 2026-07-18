@@ -2,6 +2,10 @@
 // wenn weder WebGPU noch WebGL2 verfügbar sind. Gleiches Interface
 // { render(store, kamera), kind, dpr, dispose() } wie die GPU-Renderer.
 import { CONFIG } from './config.js';
+import { funnelProject } from './renderformat.js';
+import { STATE } from './swarm.js';
+
+const FP = { x: 0, y: 0, f: 1, dim: 1, hidden: false };
 
 export function createRenderer2D(canvas, view) {
   const dpr = Math.max(1, Math.min(2, Math.round(window.devicePixelRatio || 1)));
@@ -24,16 +28,31 @@ export function createRenderer2D(canvas, view) {
     const ox = view.w / 2 - kamera.cx * scale;
     const oy = view.h / 2 - kamera.cy * scale;
 
-    const { activeList, activeCount, active, posX, posY, size, brightness, colR, colG, colB } = store;
+    const {
+      activeList, activeCount, active, posX, posY, size, brightness,
+      colR, colG, colB, state, latticeCount,
+    } = store;
+    const F = store.funnel && store.funnel.holes.length > 0
+      ? store.funnel.holes : null;
     for (let k = 0; k < activeCount; k++) {
       const i = activeList[k];
       if (active[i] === 0) continue;
-      const b = brightness[i];
+      let b = brightness[i];
       if (b <= 0.01) continue;
-      const s = size[i] * scale;
+      let wx = posX[i], wy = posY[i], sz = size[i];
+      // Wurmloch-Trichter — gleiche Projektion wie die GPU-Backends
+      if (F !== null && i < latticeCount && state[i] <= STATE.RETURNING) {
+        funnelProject(F, wx, wy, FP);
+        if (FP.hidden) continue;
+        wx = FP.x; wy = FP.y;
+        sz *= FP.f;
+        b *= FP.dim;
+        if (b <= 0.01) continue;
+      }
+      const s = sz * scale;
       if (s < 0.5) continue;
-      const x = posX[i] * scale + ox;
-      const y = posY[i] * scale + oy;
+      const x = wx * scale + ox;
+      const y = wy * scale + oy;
       if (x + s < 0 || x - s > view.w || y + s < 0 || y - s > view.h) continue;
       ctx.fillStyle = `rgb(${(colR[i] * b) | 0},${(colG[i] * b) | 0},${(colB[i] * b) | 0})`;
       ctx.beginPath();

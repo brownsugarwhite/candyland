@@ -78,6 +78,7 @@ export function createSwarm(gitter, defaultShape, tNow = 0) {
   store.edges = gitter.edges;
   store.extraLines = []; // [x0,y0,x1,y1, r,g,b,a] je Linie (0..1) — pro Frame
   store.linse = { holes: [], tunnelT: 0, tcx: 0, tcy: 0, zeit: 0 }; // Post-FX
+  store.funnel = { holes: [] }; // 3D-Wurmloch-Trichter (renderformat)
   store.freeList = new Int32Array(n - gitter.latticeCount);
   let w = 0;
   for (let i = n - 1; i >= gitter.latticeCount; i--) store.freeList[w++] = i;
@@ -323,15 +324,6 @@ export function postStep(store, tSim, dtFrame, env) {
 
     // Veil-Faktor für Trägeragenten unter Inhalten
     let veilF = 1;
-    if (env.holes && isCarrier && st <= STATE.RETURNING) {
-      // im Lochinneren gibt es KEINE sichtbaren Schwarmagenten
-      for (const hole of env.holes) {
-        const dxh = posX[i] - hole.x, dyh = posY[i] - hole.y;
-        const dh = Math.sqrt(dxh * dxh + dyh * dyh);
-        const Rh = (hole.r || CONFIG.tunnel.r) + 0.15;
-        if (dh < Rh) veilF *= Math.max(0, (dh - Rh * 0.75) / (Rh * 0.25));
-      }
-    }
     if (veil !== null && isCarrier && st <= STATE.RETURNING) {
       const hx = homeX[i], hy = homeY[i];
       const dx = hx < veil.x0 ? veil.x0 - hx : hx > veil.x1 ? hx - veil.x1 : 0;
@@ -353,30 +345,9 @@ export function postStep(store, tSim, dtFrame, env) {
       let ty = hy + wtmp.oy + dAmp * SIN_LUT[(dIdx + ph * 3 + 87) & 255];
       let shrink = wtmp.s;
 
-      // Wurmloch-Ordner: kreisrunde Löcher im Netz (Referenz 06) —
-      // Innen-Agenten stauen sich als Ring am Rand, der Trichter dimmt
-      if (env.holes) {
-        for (const hole of env.holes) {
-          const dx = hx - hole.x, dy = hy - hole.y;
-          const d = Math.sqrt(dx * dx + dy * dy) || 1e-3;
-          const R = hole.r || CONFIG.tunnel.r;
-          if (d < R) {
-            // INNEN LEER: Agenten stauen sich deutlich außerhalb des
-            // Rings (dort werden sie zu Linsen-Bögen); wer noch drin
-            // ist, blendet vollständig aus
-            const f = d / R;
-            tx = hole.x + (dx / d) * (R + 0.55 + f * 0.45);
-            ty = hole.y + (dy / d) * (R + 0.55 + f * 0.45);
-            shrink *= 0.35 + 0.45 * f;
-          } else if (d < R + 2.4) {
-            const g = 1 - (d - R) / 2.4;
-            const push = g * g * 0.4;
-            tx += (dx / d) * push;
-            ty += (dy / d) * push;
-            shrink *= 1 - 0.2 * g * g;
-          }
-        }
-      }
+      // Wurmlöcher brauchen hier KEINE Physik mehr: das Gitter behält
+      // seine Ruhelage, die Trichter-Projektion (renderformat) zieht es
+      // rein visuell in die Tiefe — echtes 3D statt Verdrängung.
 
       if (warpCursor) {
         const dx = hx - cur.wx, dy = hy - cur.wy;

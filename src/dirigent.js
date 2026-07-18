@@ -479,21 +479,26 @@ export function createDirigent(store, kamera) {
     }
   }
 
-  // ---- TUNNEL: Schwarze-Loch-Ordner mit echter Gravitationslinse --------
-  // Die Verzerrung liegt im Post-Process der Renderer (store.linse):
-  // Punktmassen-Linsengleichung β = θ − θE²/θ um jeden Tunnel, innen der
-  // Ereignishorizont, dazu der Ring-Glow. Hier leben Platzierung (Drag),
-  // Label + Dreiecks-Marker und die REISE: Kamera-Anflug (Linse zieht an)
-  // → Lichtgeschwindigkeits-Fahrt (radiale Aberration + Sternstreifen)
-  // → Ankunft als Wasser-Ringwelle in der anderen Dimension.
+  // ---- TUNNEL: echtes 3D-Wurmloch im Gitter -----------------------------
+  // Das Wurmloch ist eine Trichterfläche im Raum selbst: das Gitter samt
+  // Netz-Linien gleitet sie hinab (renderformat.funnelProject, Flamm-
+  // Einbettung, perspektivisch von oben projiziert) — keine Post-Process-
+  // Linse, keine Bandtönung. hole.r ist der SICHTBARE Schlund-Ring; in
+  // Weltkoordinaten liegt der Schlund bei rs = r·(H+tiefe)/H. Hier leben
+  // Platzierung (Drag), Label + Dreiecks-Marker und die REISE: ein
+  // kontinuierlicher Kameraflug in den Trichter mit 180°-Z-Rolle,
+  // Ankunft als Wasser-Ringwelle in der anderen Dimension.
   const dimHoles = [[], []];
   let dim = 0;
   let reise = null;      // { phase, t0, hole, scale0, cx0, cy0, switched }
   let holeDrag = null;   // { hole, lastX, lastY, movedPx }
-  let lenseBoost = 1;    // animierte Linsenstärke
-  let reiseRot = 0;      // Sichtrolle während des Durchflugs (0..2π)
+  let reiseRot = 0;      // Sichtrolle während des Durchflugs (0..π)
   let reiseSmear = 0;    // ruhige radiale Aberration
   let suppressClick = 0;
+
+  // Welt-Radius des Schlunds: alles innerhalb ist „unten" im Loch
+  const rsWorld = (h) =>
+    h.r * (CONFIG.tunnel.kameraH + CONFIG.tunnel.tiefe) / CONFIG.tunnel.kameraH;
 
   function formHoleLabel(hole) {
     const T = CONFIG.tunnel;
@@ -554,7 +559,10 @@ export function createDirigent(store, kamera) {
   function holeAt(wx, wy) {
     for (const h of dimHoles[dim]) {
       const dx = wx - h.x, dy = wy - h.y;
-      if (dx * dx + dy * dy < (h.r * 1.15) ** 2) return h;
+      // der ganze Weltbereich des Schlunds zählt — visuell ist das
+      // genau der Trichter bis knapp hinter den sichtbaren Ring
+      const R = rsWorld(h);
+      if (dx * dx + dy * dy < R * R) return h;
     }
     return null;
   }
@@ -675,7 +683,6 @@ export function createDirigent(store, kamera) {
         reise.t0 = t;
       }
     } else if (t > reise.t0 + T.welleSec) {
-      lenseBoost = 1;
       if (reise.note) showNote(reise.note);
       reise = null;
       for (const h of dimHoles[dim]) {
@@ -684,20 +691,44 @@ export function createDirigent(store, kamera) {
     }
   }
 
-  // Post-Process-Uniforms: Löcher in Screen-px + Fahrt-Zustand
+  // der sichtbare Schlund-Ring: eine feine Linie aus 48 Segmenten
+  function ringLines(h) {
+    const a = CONFIG.tunnel.ringAlpha;
+    const N = 48;
+    let px = h.x + h.r, py = h.y;
+    for (let k = 1; k <= N; k++) {
+      const w = (k / N) * Math.PI * 2;
+      const nx = h.x + Math.cos(w) * h.r, ny = h.y + Math.sin(w) * h.r;
+      store.extraLines.push(px, py, nx, ny, 0.92, 0.96, 0.94, a);
+      px = nx; py = ny;
+    }
+  }
+
+  // Fahrt-FX (Sichtrolle + Aberration) und Trichter-Daten der Renderer.
+  // store.linse.holes bleibt LEER — die Raumkrümmung ist echtes 3D im
+  // Gitter (store.funnel), kein Screen-Space-Effekt mehr.
   function linseUpdate(t) {
     const L = store.linse;
     L.holes.length = 0;
-    const sichtbar = activeApp ? [] : (reise ? [reise.hole] : dimHoles[dim]);
-    for (const h of sichtbar) {
-      const sp = kamera.worldToScreen(h.x, h.y);
-      L.holes.push({ sx: sp.x, sy: sp.y, thetaE: h.r * kamera.scale * lenseBoost });
-    }
     L.rot = reiseRot;
     L.smear = reiseSmear;
     L.tcx = kamera.viewW / 2;
     L.tcy = kamera.viewH / 2;
     L.zeit = t;
+
+    const T = CONFIG.tunnel;
+    const F = store.funnel;
+    F.holes.length = 0;
+    const sichtbar = activeApp ? [] : (reise ? [reise.hole] : dimHoles[dim]);
+    for (const h of sichtbar) {
+      const rs = rsWorld(h);
+      F.holes.push({
+        x: h.x, y: h.y, rs,
+        tiefe: T.tiefe, weite: T.weite, H: T.kameraH,
+        reich: rs + 4 * T.weite,
+      });
+      ringLines(h);
+    }
   }
 
   // ---- Apps (der Schwarm morpht zum Screen) ------------------------------
@@ -927,7 +958,7 @@ export function createDirigent(store, kamera) {
       if (brainRect) return brainRect;
       return null;
     },
-    get holes() { return activeApp ? null : (reise ? [reise.hole] : dimHoles[dim]); },
+    get holes() { return store.funnel.holes; }, // Trichter (nur Diagnose)
     get dim() { return dim; },
     get brainBusy() { return brainBusy; },
     agentName, taskLines,

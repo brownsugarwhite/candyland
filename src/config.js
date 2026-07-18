@@ -189,11 +189,12 @@ export const CONFIG = {
     ],
   },
 
-  tunnel: {               // „Tunnel" = Schwarzes-Loch-Ordner (Referenz-Shot)
-    r: 1.9,               // Einstein-Radius θE in Zellen
-    horizon: 0.62,        // Ereignishorizont = horizon·θE (innen dunkel)
-    lense: 4.2,           // Reichweite der Linse in θE (Raum stärker gekrümmt)
-    ringGlow: 0.55,       // Leuchtkraft des Rings
+  tunnel: {               // „Tunnel" = ECHTES 3D-Wurmloch: das Gitter selbst
+    r: 1.35,              // gleitet eine Trichterfläche hinab (Flamm-Ein-
+    tiefe: 4.0,           // bettung, renderformat.funnelProject). r = sicht-
+    weite: 3.0,           // barer Schlund-Ring (Zellen); tiefe = Trichter-
+    kameraH: 2.0,         // tiefe; weite = Reichweite der Raumkrümmung;
+    ringAlpha: 0.55,      // kameraH = virtuelle Kamerahöhe über der Fläche
     labelH: 0.34,         // Namens-Label (Zellen)
     dragMin: 10,          // px — mehr Bewegung = Verschieben statt Reise
     flugSec: 2.6,         // EIN kontinuierlicher Flug: rein → 180°-Z-Rolle

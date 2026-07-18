@@ -92,7 +92,6 @@ async function build(mode, viewW, viewH) {
       kamera,
       warpRects: dirigent.warpRects,
       veil: dirigent.veil,
-      holes: dirigent.holes,
       anchors: dirigent.anchors,
       wellen,
     });
@@ -344,6 +343,7 @@ toggles.high.addEventListener('click', () => mode !== 'high' && setMode('high'))
     pre.textContent = JSON.stringify({
       selftest: world.selftest(),
       linse: world.store.linse,
+      funnel: world.store.funnel,
       kamera: { cx: world.kamera.cx, cy: world.kamera.cy, scale: world.kamera.scale },
       dim: world.dirigent.dim,
       logoRow: rows,
