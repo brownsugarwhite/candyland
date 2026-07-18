@@ -199,18 +199,13 @@ export const CONFIG = {
   tunnel: {               // „Tunnel" = ECHTES 3D-Wurmloch: unendlich tiefer
     r: 2.2,               // Tubus im Gitter. r = Schlund-Radius (Zellen);
     tiefe: 6.0,           // Einbettung z = tiefe·(weite/(d−r))^0.8 — je
-    weite: 2.5,           // größer weite, desto weiter reicht die Krümmung
+    weite: 3.2,           // größer weite, desto weiter reicht die Krümmung
     ringAlpha: 0.55,      // feine Ringlinie am Schlundrand
     labelH: 0.34,         // Namens-Label (Zellen)
     dragMin: 10,          // px — mehr Bewegung = Verschieben statt Reise
-    flugSec: 2.6,         // EIN kontinuierlicher Flug: rein → 180°-Z-Rolle
-    welleSec: 1.2,        //   → raus; die neue Welt entsteht als Ringwelle
-    welleSpeed: 11,       // Zellen/s
-    dims: [
-      { tint: [213, 218, 215], omega: 0.55 },
-      { tint: [228, 213, 194], omega: 0.34 }, // wärmer, noch ruhiger
-    ],
-  },
+    flugSec: 2.6,         // EINE durchgehende Einstellung: durch die Röhre,
+    saug: 1.8,            //   180° um die Tunnelachse, kein Schnitt; saug =
+  },                      //   wie stark der Flug die Umgebung hineinzieht
 
   malen: {                // Paint (Referenz 05) — Offsets in Zellen vom Rahmen
     canvas: { dx: 2.3, dy: 2.5, w: 5.6, h: 3.5 }, // weiße Fläche (1px-Agenten)

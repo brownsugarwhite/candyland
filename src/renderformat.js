@@ -1,6 +1,7 @@
 // Gemeinsames Instanz-Format für WebGPU- und WebGL2-Renderer — die eine
 // Quelle der Wahrheit fürs Packing. Ein Agent = eine Instanz (Quad):
-//   [x, y, size, rot, r, g, b, shapeA, shapeB, shapeT, frei, frei] = 12 f32 (48 B)
+//   [x, y, size, rot, r, g, b, shapeA, shapeB, shapeT, aspect, frei] = 12 f32
+//   (48 B; aspect = anisotrope Streckung entlang der rot-Achse, 1 = rund)
 // Koordinaten/Größe in WELTEINHEITEN; Farbe bereits mit Helligkeit
 // multipliziert (premultiplied über dunklem Grund).
 import { CONFIG } from './config.js';
@@ -118,10 +119,34 @@ export function packInstances(store, kamera, arr) {
     let b = brightness[i];
     if (b <= 0.01) continue;
     let px = posX[i], py = posY[i], sz = size[i];
-    let fog = 1;
+    let fog = 1, rotV = rot[i], aspect = 1;
     if (aktiv) {
       project3d(P, kamera, px, py, z, PJ_A);
       if (PJ_A.hidden) continue;
+      // ECHTE VERZERRUNG: im Sog strecken sich die Agenten entlang der
+      // Fallrichtung — der lokale Jacobian der Projektion liefert die
+      // radiale Stauchung, tangential bleibt PJ_A.k → Kacheln werden zu
+      // Bögen, während sie ins Loch gezogen werden
+      if (z > 0.04 && P.holes.length > 0) {
+        let hx = 0, hy = 0, best = Infinity;
+        for (let q = 0; q < P.holes.length; q++) {
+          const h = P.holes[q];
+          const ddx = h.x - px, ddy = h.y - py;
+          const d2 = ddx * ddx + ddy * ddy;
+          if (d2 < best) { best = d2; hx = h.x; hy = h.y; }
+        }
+        const d = Math.sqrt(best) || 1e-3;
+        const step = d > 0.55 ? 0.45 : -0.45; // nahe am Schlund: nach außen
+        const qx = px + ((hx - px) / d) * step;
+        const qy = py + ((hy - py) / d) * step;
+        project3d(P, kamera, qx, qy, tiefeAt(P, qx, qy), PJ_B);
+        if (!PJ_B.hidden) {
+          const jx = PJ_B.x - PJ_A.x, jy = PJ_B.y - PJ_A.y;
+          const radial = Math.hypot(jx, jy) / Math.abs(step);
+          aspect = Math.min(1.5, Math.max(0.1, radial / Math.max(PJ_A.k, 1e-3)));
+          rotV = Math.atan2(jy, jx);
+        }
+      }
       px = PJ_A.x;
       py = PJ_A.y;
       sz *= PJ_A.k;
@@ -134,14 +159,14 @@ export function packInstances(store, kamera, arr) {
     arr[w++] = px;
     arr[w++] = py;
     arr[w++] = sz;
-    arr[w++] = rot[i];
+    arr[w++] = rotV;
     arr[w++] = colR[i] * b * inv * fog + FOG[0] * (1 - fog);
     arr[w++] = colG[i] * b * inv * fog + FOG[1] * (1 - fog);
     arr[w++] = colB[i] * b * inv * fog + FOG[2] * (1 - fog);
     arr[w++] = shapeA[i];
     arr[w++] = shapeB[i];
     arr[w++] = shapeT[i] < 0 ? 0 : shapeT[i];
-    arr[w++] = 0;
+    arr[w++] = aspect; // radiale Streckung (1 = rund) — Slot 10
     arr[w++] = 0;
   }
   return w / INST_FLOATS;

@@ -58,11 +58,12 @@ struct VOut {
   let rot = inst[o + 3u];
   let col = vec3f(inst[o + 4u], inst[o + 5u], inst[o + 6u]);
   let shape = vec3f(inst[o + 7u], inst[o + 8u], inst[o + 9u]);
+  let aspect = inst[o + 10u]; // anisotrope Streckung (Wurmloch-Sog)
 
   let corner = vec2f(f32(vi & 1u), f32(vi >> 1u)) * 2.0 - 1.0;
   let c = cos(rot);
   let s = sin(rot);
-  let local = corner * (size * 0.5);
+  let local = corner * (vec2f(size * aspect, size) * 0.5);
   let world = pos + vec2f(local.x * c - local.y * s, local.x * s + local.y * c);
   let screen = (world - cam.center) * cam.scale + cam.view * 0.5;
   let clip = screen / cam.view * 2.0 - 1.0;

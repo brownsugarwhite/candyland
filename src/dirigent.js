@@ -495,15 +495,17 @@ export function createDirigent(store, kamera) {
   // Lochkamera blickt gelockt senkrecht von oben (Grundlook unverändert),
   // aber der Schlund ist ein unendlich tiefer Tubus mit echter Perspektive
   // und Parallaxe. Hier leben Platzierung (Drag), Label + Dreiecks-Marker,
-  // die Perspektiven-Entsperrung („frei") und die REISE: die Kamerahöhe
-  // taucht WIRKLICH durch die Oberfläche in den Tubus (diveHc) mit
-  // 180°-Z-Rolle; Ankunft als Wasser-Ringwelle in der anderen Dimension.
+  // die Perspektiven-Entsperrung („frei") und die REISE: eine einzige
+  // durchgehende Einstellung — die Kamerahöhe taucht WIRKLICH durch die
+  // Oberfläche (diveHc), der Sog (reiseSaug) zieht die Schwarmagenten
+  // mit in die Röhre, die Sicht dreht 180° um die Tunnelachse.
   const dimHoles = [[], []];
   let dim = 0;
-  let reise = null;      // { phase, t0, hole, scale0, cx0, cy0, switched }
+  let reise = null;      // { t0, hole, scale0, cx0, cy0 }
   let holeDrag = null;   // { hole, lastX, lastY, movedPx }
-  let reiseRot = 0;      // Sichtrolle während des Durchflugs (0..π)
+  let reiseRot = 0;      // Drehung um die Tunnelachse (0..π)
   let reiseSmear = 0;    // ruhige radiale Aberration
+  let reiseSaug = 0;     // 0..1 — der Tunnel saugt die Umgebung hinein
   let diveHc = null;     // Kamerahöhe während des Flugs (sonst Ruhehöhe)
   let tiltTgt = 0;       // „frei": Ziel-Neigung der entsperrten Perspektive
   let tiltCur = 0;
@@ -604,48 +606,7 @@ export function createDirigent(store, kamera) {
   function startReise(hole) {
     if (reise) return;
     clearHoleLabel(hole);
-    reise = {
-      phase: 'flug', t0: tNow, hole, switched: false, note: '',
-      scale0: kamera.scale, cx0: kamera.cx, cy0: kamera.cy,
-    };
-  }
-
-  function dimensionsWechsel(hole) {
-    const T = CONFIG.tunnel;
-    dim = 1 - dim;
-    if (!dimHoles[dim].some((h) => Math.hypot(h.x - hole.x, h.y - hole.y) < 1)) {
-      dimHoles[dim].push({
-        x: hole.x, y: hole.y, r: T.r,
-        name: dim === 1 ? 'zurück' : hole.name,
-        labelIds: null, triId: -1,
-      });
-    }
-    store.baseTint = [...T.dims[dim].tint];
-    CONFIG.wellen.omega = T.dims[dim].omega;
-    // Ankunft als WASSERWELLE vom Loch aus — die neue Welt entsteht,
-    // während die Kamera noch aus dem Tunnel herausfliegt
-    for (const i of store.carrierList) {
-      if (store.state[i] > STATE.RETURNING) continue;
-      const dx = store.homeX[i] - hole.x, dy = store.homeY[i] - hole.y;
-      const d = Math.hypot(dx, dy) || 1e-3;
-      store.active[i] = 1;
-      store.posX[i] = store.homeX[i] - (dx / d) * 0.55;
-      store.posY[i] = store.homeY[i] - (dy / d) * 0.55;
-      store.velX[i] = 0;
-      store.velY[i] = 0;
-      store.size[i] = 0.02;
-      store.state[i] = STATE.RETURNING;
-      store.frozen[i] = 0;
-      store.activateAt[i] = tNow + 0.2 + d / T.welleSpeed;
-      store.tgtR[i] = store.baseTint[0];
-      store.tgtG[i] = store.baseTint[1];
-      store.tgtB[i] = store.baseTint[2];
-      store.brightness[i] = 0;
-    }
-    store.needsRebuild = true;
-    reise.note = dim === 1
-      ? 'neue dimension — der tunnel führt zurück'
-      : 'wieder zuhause';
+    reise = { t0: tNow, hole, scale0: kamera.scale, cx0: kamera.cx, cy0: kamera.cy };
   }
 
   function reiseUpdate(t) {
@@ -653,50 +614,40 @@ export function createDirigent(store, kamera) {
     const T = CONFIG.tunnel;
     const H = reise.hole;
     const glatt = (p) => p * p * (3 - 2 * p);
-    if (reise.phase === 'flug') {
-      // ECHTER 3D-STURZ, ohne Schnitte: die Kamera gleitet über den
-      // Schlund und ihre HÖHE taucht durch die Oberfläche in den Tubus —
-      // die Fläche rauscht perspektivisch nach außen vorbei, die
-      // Tubus-Ringe ziehen durch, dabei rollt die Sicht um Z auf 180°.
-      // Der Dimensionswechsel liegt am tiefsten Punkt (ringsum nur noch
-      // dunkle Tiefe), dann steigt die Kamera aus dem Austritts-Tubus
-      // der anderen Dimension wieder auf.
-      const p = Math.min(1, (t - reise.t0) / T.flugSec);
-      const anflug = glatt(Math.min(1, p * 2.2));
-      kamera.setView(
-        reise.cx0 + (H.x - reise.cx0) * anflug,
-        reise.cy0 + (H.y - reise.cy0) * anflug,
-        reise.scale0,
-      );
-      const h0 = (kamera.viewH / kamera.scale) * CONFIG.p3d.hFac;
-      const zTief = CONFIG.p3d.zMax * 0.85;
-      const dreieck = 1 - Math.abs(1 - 2 * p); // rein … Scheitel … raus
-      // erst anfliegen, DANN stürzen — sonst taucht die Kamera ab,
-      // bevor sie über dem Schlund steht
-      const sturz = glatt(Math.max(0, (dreieck - 0.14) / 0.86));
-      diveHc = h0 - (h0 + zTief) * sturz;
-      // Z-Rolle: kontinuierlich 0 → 180° über den ganzen Flug
-      reiseRot = Math.PI * glatt(p);
-      reiseSmear = Math.sin(Math.PI * p) * 0.55;
-      if (!reise.switched && p >= 0.5) {
-        reise.switched = true;
-        dimensionsWechsel(H);
-      }
-      if (p >= 1) {
-        // 180° im Schachbrett = deckungsgleich → Rolle unsichtbar lösen
-        reiseRot = 0;
-        reiseSmear = 0;
-        diveHc = null;
-        kamera.snapClamped(reise.scale0);
-        reise.phase = 'welle';
-        reise.t0 = t;
-      }
-    } else if (t > reise.t0 + T.welleSec) {
-      if (reise.note) showNote(reise.note);
+    // EINE durchgehende Einstellung, kein Schnitt, kein Dimensionswechsel:
+    // die Kamera gleitet über den Schlund, ihre Höhe taucht durch die
+    // Oberfläche in die Röhre. Der Tunnel SAUGT dabei die Schwarmagenten
+    // der Vorderseite mit hinein (der Sog vertieft die Einbettung — sie
+    // rutschen sichtbar ins Loch und strecken sich zu Bögen), die Sicht
+    // dreht kontinuierlich 180° um die Tunnelachse, und hinter dem
+    // Scheitel gibt die Röhre alles auf der Rückseite wieder frei.
+    const p = Math.min(1, (t - reise.t0) / T.flugSec);
+    const anflug = glatt(Math.min(1, p * 2.2));
+    kamera.setView(
+      reise.cx0 + (H.x - reise.cx0) * anflug,
+      reise.cy0 + (H.y - reise.cy0) * anflug,
+      reise.scale0,
+    );
+    const h0 = (kamera.viewH / kamera.scale) * CONFIG.p3d.hFac;
+    const zTief = CONFIG.p3d.zMax * 0.85;
+    const dreieck = 1 - Math.abs(1 - 2 * p); // rein … Scheitel … raus
+    // erst anfliegen, DANN stürzen — sonst taucht die Kamera ab,
+    // bevor sie über dem Schlund steht
+    const sturz = glatt(Math.max(0, (dreieck - 0.14) / 0.86));
+    diveHc = h0 - (h0 + zTief) * sturz;
+    reiseSaug = Math.sin(Math.PI * p); // Sog schwillt an und wieder ab
+    // Drehung um die Tunnelachse: kontinuierlich 0 → 180°
+    reiseRot = Math.PI * glatt(p);
+    reiseSmear = Math.sin(Math.PI * p) * 0.55;
+    if (p >= 1) {
+      // 180° im Schachbrett = deckungsgleich → Drehung unsichtbar lösen
+      reiseRot = 0;
+      reiseSmear = 0;
+      reiseSaug = 0;
+      diveHc = null;
+      kamera.snapClamped(reise.scale0);
       reise = null;
-      for (const h of dimHoles[dim]) {
-        if (!h.labelIds) formHoleLabel(h);
-      }
+      formHoleLabel(H);
     }
   }
 
@@ -732,11 +683,15 @@ export function createDirigent(store, kamera) {
     const P = store.p3d;
     P.holes.length = 0;
     const sichtbar = activeApp ? [] : (reise ? [reise.hole] : dimHoles[dim]);
+    // der Sog des Flugs vertieft und weitet die Einbettung — die
+    // Schwarmagenten der Umgebung rutschen sichtbar mit in die Röhre
+    const tiefe = T.tiefe * (1 + reiseSaug * T.saug);
+    const weite = T.weite * (1 + reiseSaug * T.saug * 0.5);
     for (const h of sichtbar) {
-      const reich = h.r + T.weite * 6;
+      const reich = h.r + weite * 6;
       P.holes.push({
-        x: h.x, y: h.y, r: h.r, tiefe: T.tiefe, weite: T.weite, reich,
-        zOff: T.tiefe * Math.pow(T.weite / (reich - h.r), 0.8),
+        x: h.x, y: h.y, r: h.r, tiefe, weite, reich,
+        zOff: tiefe * Math.pow(weite / (reich - h.r), 0.8),
       });
     }
     tiltCur += (tiltTgt - tiltCur) * Math.min(1, 5 * dt);

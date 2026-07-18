@@ -114,6 +114,7 @@ layout(location=1) in float a_size;  // Welt (Kantenlänge)
 layout(location=2) in float a_rot;
 layout(location=3) in vec3 a_col;    // premultipliziert mit Helligkeit
 layout(location=4) in vec3 a_shape;  // (formA, formB, morphT)
+layout(location=5) in float a_aspect; // anisotrope Streckung (Wurmloch-Sog)
 uniform vec4 u_cam;   // cx, cy, scale, –
 uniform vec2 u_view;  // Viewport in CSS-px
 out vec2 v_p;
@@ -122,7 +123,7 @@ out vec3 v_shape;
 void main() {
   vec2 corner = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1)) * 2.0 - 1.0;
   float c = cos(a_rot), s = sin(a_rot);
-  vec2 local = corner * (a_size * 0.5);
+  vec2 local = corner * (vec2(a_size * a_aspect, a_size) * 0.5);
   vec2 world = a_pos + vec2(local.x * c - local.y * s, local.x * s + local.y * c);
   vec2 screen = (world - u_cam.xy) * u_cam.z + u_view * 0.5;
   vec2 clip = screen / u_view * 2.0 - 1.0;
@@ -280,7 +281,7 @@ export function createRendererGL(canvas, view) {
   const vbo = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
   const stride = INST_FLOATS * 4;
-  const attribs = [[0, 2, 0], [1, 1, 8], [2, 1, 12], [3, 3, 16], [4, 3, 28]];
+  const attribs = [[0, 2, 0], [1, 1, 8], [2, 1, 12], [3, 3, 16], [4, 3, 28], [5, 1, 40]];
   for (const [loc, n, off] of attribs) {
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, n, gl.FLOAT, false, stride, off);

@@ -91,14 +91,17 @@ Logo tritt beiseite, oben rechts sitzt der pinke Schließen-Agent
 - `tunnel`/`ordner` (`06A/06B`, src/dirigent.js): echtes 3D-Wurmloch —
   der Schlund ist ein unendlich tiefer Tubus in der 3D-Szene
   (Einbettung z = tiefe·(weite/(d−r))^0.8, Tiefennebel zur
-  Hintergrundfarbe, Maler-Sortierung; KEINE Post-Process-Linse). Man
-  sieht echte Parallaxe: außerhalb der Bildmitte blickt man schräg auf
-  die Innenwand. Drag verschiebt den Tunnel, Klick = echter Kamerasturz:
-  die Kamerahöhe (p3d.hc) taucht durch die Oberfläche in den Tubus,
-  dabei 180°-Z-Rolle (Post-FX nur Rolle + Aberration); Dimensionswechsel
-  unsichtbar am tiefsten Punkt, Ankunft als Ringwelle. Dimension 2 ist
-  wärmer getönt (store.baseTint) mit langsameren Wellen; Rückweg-Loch am
-  selben Ort.
+  Hintergrundfarbe, Maler-Sortierung; KEINE Post-Process-Linse). Die
+  Agenten werden sichtbar hineingezogen und strecken sich dabei
+  anisotrop zu Bögen (Jacobian der Projektion → Instanz-aspect in den
+  Shadern); echte Parallaxe: außerhalb der Bildmitte blickt man schräg
+  auf die Innenwand. Drag verschiebt den Tunnel. Klick = die REISE, EINE
+  durchgehende Einstellung ohne Schnitt und ohne Dimensionswechsel: die
+  Kamerahöhe (p3d.hc) taucht durch die Oberfläche in die Röhre, der Sog
+  (tunnel.saug) zieht die umliegenden Agenten mit hinein, die Sicht
+  dreht kontinuierlich 180° um die Tunnelachse (Post-FX nur Drehung +
+  Aberration), und hinter dem Scheitel gibt die Röhre alles auf der
+  Rückseite wieder frei.
 
 ## Technik
 
