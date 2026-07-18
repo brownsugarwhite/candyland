@@ -31,6 +31,105 @@ void main() {
   outColor = vec4(mix(u_inner, u_outer, smoothstep(0.15, 1.0, r)), 1.0);
 }`;
 
+const VS_POST = `#version 300 es
+out vec2 v_uv;
+void main() {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  v_uv = p;
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+// GRAVITATIONSLINSE + WURMLOCH-FAHRT (Post-Process).
+// Physik: Punktmassen-Linsengleichung β = θ − θE²/θ — Hintergrund-Kacheln
+// werden außerhalb des Einstein-Radius θE zu tangentialen Bögen verzerrt
+// (leichte chromatische Aberration wie bei echter Lichtablenkung).
+// Innerhalb θE: Ereignishorizont (radialer dunkler Schleier), Ring-Glow.
+// Die Fahrt (u_fx.x) streckt das echte Szenenlicht radial nach vorn
+// (relativistische Aberration) und legt prozedurale Sternstreifen darüber.
+const FS_POST = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_scene;
+uniform vec2 u_view;
+uniform vec4 u_holes[4]; // sx, sy, thetaE(px), aktiv
+uniform vec4 u_fx;       // tunnelT, tcx, tcy, zeit
+uniform vec3 u_ringCol;
+uniform vec3 u_par;      // horizonFrac, lenseReich, ringGlow
+out vec4 outColor;
+
+// Screen-Koordinaten laufen oben-links los; GL-Texturen unten-links —
+// deshalb hier die y-Umrechnung in beiden Richtungen
+vec3 szene(vec2 px) {
+  vec2 uv = vec2(px.x / u_view.x, 1.0 - px.y / u_view.y);
+  return texture(u_scene, clamp(uv, vec2(0.001), vec2(0.999))).rgb;
+}
+
+void main() {
+  // sichtbarer Bereich des Fullscreen-Dreiecks: v_uv ∈ 0..1
+  vec2 px = vec2(v_uv.x, 1.0 - v_uv.y) * u_view;
+  float veil = 1.0;
+  float ring = 0.0;
+
+  // Linsen-Remap (Rot/Grün/Blau minimal verschieden → Aberration)
+  vec2 pR = px;
+  vec2 pG = px;
+  vec2 pB = px;
+  for (int i = 0; i < 4; i++) {
+    vec4 h = u_holes[i];
+    if (h.w < 0.5) continue;
+    vec2 rel = px - h.xy;
+    float d = max(length(rel), 1e-3);
+    float tE = h.z;
+    if (d < tE) {
+      // Ereignishorizont: innen ruhig und dunkel (Label bleibt lesbar)
+      veil *= mix(0.12, 1.0, pow(clamp(d / tE, 0.0, 1.0), 0.9));
+    } else if (d < tE * u_par.y) {
+      float fall = 1.0 - smoothstep(tE * (u_par.y * 0.7), tE * u_par.y, d);
+      vec2 dir = rel / d;
+      float dR = d - (tE * tE * 0.985 * 0.985) / d;
+      float dG = d - (tE * tE) / d;
+      float dB = d - (tE * tE * 1.015 * 1.015) / d;
+      pR = mix(pR, h.xy + dir * dR, fall);
+      pG = mix(pG, h.xy + dir * dG, fall);
+      pB = mix(pB, h.xy + dir * dB, fall);
+      // Strahlen aus dem Horizont bleiben schwarz (Schatten des Lochs)
+      veil *= smoothstep(0.0, tE * 0.6, dG);
+    }
+    float rd = abs(d - tE);
+    ring += u_par.z * (exp(-rd * rd / 3.0) + 0.12 * exp(-rd * rd / 160.0));
+  }
+  vec3 col = vec3(szene(pR).r, szene(pG).g, szene(pB).b) * veil;
+  col += u_ringCol * ring;
+
+  // Wurmloch-Fahrt
+  float T = u_fx.x;
+  if (T > 0.004) {
+    vec2 c = u_fx.yz;
+    vec2 rel = px - c;
+    float r = max(length(rel), 1.0);
+    float rn = r / (0.5 * length(u_view));
+    // Licht der echten Szene radial nach vorn gestreckt (Aberration)
+    vec3 smear = vec3(0.0);
+    for (int k = 0; k < 7; k++) {
+      float t = (float(k) / 6.0) * T * 0.6;
+      smear += szene(c + rel * (1.0 - t));
+    }
+    smear /= 7.0;
+    col = mix(col, smear, min(1.0, T * 1.5));
+    // Sternstreifen: pro Winkelsektor ein Lichtfaden, beschleunigend
+    float a = atan(rel.y, rel.x);
+    float sektor = floor(a * 60.0);
+    float seed = fract(sin(sektor * 12.9898 + 78.233) * 43758.5453);
+    float lauf = fract(rn * (2.0 + seed * 5.0) - u_fx.w * (1.5 + 4.0 * T) * (0.5 + seed) + seed * 11.0);
+    float streak = smoothstep(0.72, 0.98, lauf) * step(0.45, seed);
+    streak *= smoothstep(0.05, 0.4, rn) * T;
+    col += mix(vec3(0.65, 0.82, 1.0), vec3(1.0), seed) * streak * 1.7;
+    // Glut im Zentrum
+    col += vec3(0.75, 0.87, 1.0) * exp(-rn * rn * 14.0 / (0.2 + T)) * T * 0.9;
+  }
+  outColor = vec4(col, 1.0);
+}`;
+
 const VS_LINES = `#version 300 es
 layout(location=0) in vec2 a_pos;
 layout(location=1) in vec4 a_col;
@@ -159,6 +258,32 @@ export function createRendererGL(canvas, view) {
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
+  // Offscreen-Szene für den Linsen-/Tunnel-Pass
+  const sceneTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, view.w * dpr, view.h * dpr, 0,
+    gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, sceneTex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  const progPost = link(gl, VS_POST, FS_POST);
+  gl.useProgram(progPost);
+  gl.uniform1i(gl.getUniformLocation(progPost, 'u_scene'), 1);
+  gl.uniform2f(gl.getUniformLocation(progPost, 'u_view'), view.w, view.h);
+  gl.uniform3f(gl.getUniformLocation(progPost, 'u_ringCol'), 0.72, 0.79, 0.76);
+  gl.uniform3f(gl.getUniformLocation(progPost, 'u_par'),
+    CONFIG.tunnel.horizon, CONFIG.tunnel.lense, CONFIG.tunnel.ringGlow);
+  const uHoles = gl.getUniformLocation(progPost, 'u_holes');
+  const uFx = gl.getUniformLocation(progPost, 'u_fx');
+  const vaoPost = gl.createVertexArray();
+  const holeArr = new Float32Array(16);
+
   const formen = formenInfo();
   let atlasVersion = -1;
   const tex = gl.createTexture();
@@ -230,6 +355,10 @@ export function createRendererGL(canvas, view) {
   function render(store, kamera) {
     if (formen.version !== atlasVersion) uploadAtlas();
 
+    // Szene ins Offscreen-Ziel zeichnen
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.viewport(0, 0, view.w * dpr, view.h * dpr);
+
     gl.useProgram(progBg);
     gl.bindVertexArray(vaoBg);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -267,6 +396,27 @@ export function createRendererGL(canvas, view) {
       gl.bindVertexArray(vaoLn);
       gl.drawArrays(gl.LINES, ln.nMesh, ln.nTotal - ln.nMesh);
     }
+
+    // Post-Process: Gravitationslinse + Wurmloch-Fahrt auf den Screen
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, view.w * dpr, view.h * dpr);
+    const L = store.linse || { holes: [], tunnelT: 0, tcx: 0, tcy: 0, zeit: 0 };
+    holeArr.fill(0);
+    for (let i = 0; i < Math.min(4, L.holes.length); i++) {
+      holeArr[i * 4] = L.holes[i].sx;
+      holeArr[i * 4 + 1] = L.holes[i].sy;
+      holeArr[i * 4 + 2] = L.holes[i].thetaE;
+      holeArr[i * 4 + 3] = 1;
+    }
+    gl.useProgram(progPost);
+    gl.uniform4fv(uHoles, holeArr);
+    gl.uniform4f(uFx, L.tunnelT, L.tcx, L.tcy, L.zeit);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+    gl.bindVertexArray(vaoPost);
+    gl.disable(gl.BLEND);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.enable(gl.BLEND);
   }
 
   return {
@@ -275,9 +425,12 @@ export function createRendererGL(canvas, view) {
       gl.deleteProgram(prog);
       gl.deleteProgram(progBg);
       gl.deleteProgram(progLn);
+      gl.deleteProgram(progPost);
       gl.deleteBuffer(vbo);
       gl.deleteBuffer(vboLn);
       gl.deleteTexture(tex);
+      gl.deleteTexture(sceneTex);
+      gl.deleteFramebuffer(fbo);
     },
   };
 }

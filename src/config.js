@@ -189,17 +189,18 @@ export const CONFIG = {
     ],
   },
 
-  wurmloch: {             // Ordner = kreisrundes Loch im Netz (Referenz 06)
-    r: 1.05,              // Lochradius (Zellen)
-    feather: 2.4,         // Einzugsbereich um den Rand
-    rim: 0.5,             // Ring-Kompression: Innen-Agenten stauen sich am Rand
-    ringDots: 14,         // kleiner Punktring markiert das Loch
-    ringDotPx: 3.4,
-    ringSpin: 0.3,        // rad/s — der Ring dreht ruhig
-    flugSec: 1.5,         // Kameraflug INS Loch
-    flugZoom: 6,          // Zoomfaktor des Flugs
-    welleSec: 2.4,        // Aufbau der neuen Dimension als Wasser-Ringwelle
-    welleSpeed: 9,        // Zellen/s — Ausbreitung der Aufbau-Welle
+  tunnel: {               // „Tunnel" = Schwarzes-Loch-Ordner (Referenz-Shot)
+    r: 1.9,               // Einstein-Radius θE in Zellen
+    horizon: 0.62,        // Ereignishorizont = horizon·θE (innen dunkel)
+    lense: 3.2,           // Reichweite der Linse in θE
+    ringGlow: 0.55,       // Leuchtkraft des Rings
+    labelH: 0.34,         // Namens-Label (Zellen)
+    dragMin: 10,          // px — mehr Bewegung = Verschieben statt Reise
+    anflugSec: 0.9,       // Kamera nähert sich, Linse verstärkt sich
+    anflugLense: 3.4,     // Linsen-Verstärkung am Ende des Anflugs
+    tunnelSec: 2.0,       // Lichtgeschwindigkeits-Fahrt (Streckung+Streifen)
+    welleSec: 2.2,        // Aufbau der neuen Dimension als Wasser-Ringwelle
+    welleSpeed: 9,        // Zellen/s
     dims: [
       { tint: [213, 218, 215], omega: 0.55 },
       { tint: [228, 213, 194], omega: 0.34 }, // wärmer, noch ruhiger

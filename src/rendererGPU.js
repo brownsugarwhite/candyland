@@ -96,6 +96,94 @@ struct LOut { @builtin(position) pos: vec4f, @location(0) col: vec4f };
   return vec4f(in.col.rgb * in.col.a, in.col.a);
 }
 
+// ---- Post-Process: Gravitationslinse + Wurmloch-Fahrt ------------------
+// Physik: Punktmassen-Linsengleichung β = θ − θE²/θ (Bögen außerhalb des
+// Einstein-Radius, chromatische Aberration), innen Ereignishorizont.
+// Die Fahrt streckt das Szenenlicht radial (Aberration) + Sternstreifen.
+struct Linse {
+  holes: array<vec4f, 4>, // sx, sy, thetaE, aktiv
+  fx: vec4f,              // tunnelT, tcx, tcy, zeit
+  par: vec4f,             // horizonFrac, lenseReich, ringGlow, –
+  ringCol: vec4f,
+};
+@group(1) @binding(0) var<uniform> linse: Linse;
+@group(1) @binding(1) var sceneTex: texture_2d<f32>;
+@group(1) @binding(2) var sceneSamp: sampler;
+
+struct PostOut { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
+
+@vertex fn vsPost(@builtin(vertex_index) vi: u32) -> PostOut {
+  var out: PostOut;
+  let p = vec2f(f32((vi << 1u) & 2u), f32(vi & 2u));
+  out.uv = p;
+  out.pos = vec4f(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
+  return out;
+}
+
+fn szene(px: vec2f) -> vec3f {
+  return textureSampleLevel(sceneTex, sceneSamp,
+    clamp(px / cam.view, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
+}
+
+@fragment fn fsPost(in: PostOut) -> @location(0) vec4f {
+  // sichtbarer Bereich des Fullscreen-Dreiecks: uv ∈ 0..1
+  let px = in.uv * cam.view;
+  var veil = 1.0;
+  var ring = 0.0;
+  var pR = px;
+  var pG = px;
+  var pB = px;
+  for (var i = 0; i < 4; i++) {
+    let h = linse.holes[i];
+    if (h.w < 0.5) { continue; }
+    let rel = px - h.xy;
+    let d = max(length(rel), 1e-3);
+    let tE = h.z;
+    if (d < tE) {
+      veil *= mix(0.12, 1.0, pow(clamp(d / tE, 0.0, 1.0), 0.9));
+    } else if (d < tE * linse.par.y) {
+      let fall = 1.0 - smoothstep(tE * (linse.par.y * 0.7), tE * linse.par.y, d);
+      let dir = rel / d;
+      let dR = d - (tE * tE * 0.970225) / d;
+      let dG = d - (tE * tE) / d;
+      let dB = d - (tE * tE * 1.030225) / d;
+      pR = mix(pR, h.xy + dir * dR, fall);
+      pG = mix(pG, h.xy + dir * dG, fall);
+      pB = mix(pB, h.xy + dir * dB, fall);
+      // Strahlen aus dem Horizont bleiben schwarz (Schatten des Lochs)
+      veil *= smoothstep(0.0, tE * 0.6, dG);
+    }
+    let rd = abs(d - tE);
+    ring += linse.par.z * (exp(-rd * rd / 3.0) + 0.12 * exp(-rd * rd / 160.0));
+  }
+  var col = vec3f(szene(pR).r, szene(pG).g, szene(pB).b) * veil;
+  col += linse.ringCol.rgb * ring;
+
+  let T = linse.fx.x;
+  if (T > 0.004) {
+    let c = linse.fx.yz;
+    let rel = px - c;
+    let r = max(length(rel), 1.0);
+    let rn = r / (0.5 * length(cam.view));
+    var smear = vec3f(0.0);
+    for (var k = 0; k < 7; k++) {
+      let t = (f32(k) / 6.0) * T * 0.6;
+      smear += szene(c + rel * (1.0 - t));
+    }
+    smear /= 7.0;
+    col = mix(col, smear, min(1.0, T * 1.5));
+    let a = atan2(rel.y, rel.x);
+    let sektor = floor(a * 60.0);
+    let seed = fract(sin(sektor * 12.9898 + 78.233) * 43758.5453);
+    let lauf = fract(rn * (2.0 + seed * 5.0) - linse.fx.w * (1.5 + 4.0 * T) * (0.5 + seed) + seed * 11.0);
+    var streak = smoothstep(0.72, 0.98, lauf) * step(0.45, seed);
+    streak *= smoothstep(0.05, 0.4, rn) * T;
+    col += mix(vec3f(0.65, 0.82, 1.0), vec3f(1.0), seed) * streak * 1.7;
+    col += vec3f(0.75, 0.87, 1.0) * exp(-rn * rn * 14.0 / (0.2 + T)) * T * 0.9;
+  }
+  return vec4f(col, 1.0);
+}
+
 fn sdAnalytic(p: vec2f, s: f32) -> f32 {
   if (s < 0.5) { return length(p) - 0.92; }
   if (s < 1.5) { return max(abs(p.x), abs(p.y)) - 0.95; }
@@ -191,6 +279,12 @@ export async function createRendererGPU(canvas, view) {
   const sampler = device.createSampler({
     magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear',
   });
+  const sceneTex = device.createTexture({
+    size: [view.w * dpr, view.h * dpr],
+    format,
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+  });
+  const sceneSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
 
   const module = device.createShaderModule({ code: WGSL(formen.grid) });
 
@@ -230,7 +324,28 @@ export async function createRendererGPU(canvas, view) {
   });
   let bindGroup = makeBindGroup();
 
+  const linseBuf = device.createBuffer({
+    size: 16 * 4 + 3 * 16,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  const layoutPost = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+    ],
+  });
+  const bindPost = device.createBindGroup({
+    layout: layoutPost,
+    entries: [
+      { binding: 0, resource: { buffer: linseBuf } },
+      { binding: 1, resource: sceneTex.createView() },
+      { binding: 2, resource: sceneSampler },
+    ],
+  });
+
   const pipeLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
+  const pipeLayoutPost = device.createPipelineLayout({ bindGroupLayouts: [layout, layoutPost] });
   const blend = {
     color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
     alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
@@ -253,6 +368,15 @@ export async function createRendererGPU(canvas, view) {
     fragment: { module, entryPoint: 'fsLine', targets: [{ format, blend }] },
     primitive: { topology: 'line-list' },
   });
+  const pipePost = device.createRenderPipeline({
+    layout: pipeLayoutPost,
+    vertex: { module, entryPoint: 'vsPost' },
+    fragment: { module, entryPoint: 'fsPost', targets: [{ format }] },
+    primitive: { topology: 'triangle-list' },
+  });
+  const linseData = new Float32Array(28);
+  linseData.set([CONFIG.tunnel.horizon, CONFIG.tunnel.lense, CONFIG.tunnel.ringGlow, 0], 20);
+  linseData.set([0.72, 0.79, 0.76, 1], 24);
 
   const inner = hexToRgb01(CONFIG.colors.bgInner);
   const outer = hexToRgb01(CONFIG.colors.bgOuter);
@@ -304,10 +428,24 @@ export async function createRendererGPU(canvas, view) {
       device.queue.writeBuffer(lineBuf, 0, lnArr, 0, ln.nTotal * LINE_FLOATS);
     }
 
+    const L = store.linse || { holes: [], tunnelT: 0, tcx: 0, tcy: 0, zeit: 0 };
+    linseData.fill(0, 0, 16);
+    for (let i = 0; i < Math.min(4, L.holes.length); i++) {
+      linseData[i * 4] = L.holes[i].sx;
+      linseData[i * 4 + 1] = L.holes[i].sy;
+      linseData[i * 4 + 2] = L.holes[i].thetaE;
+      linseData[i * 4 + 3] = 1;
+    }
+    linseData[16] = L.tunnelT;
+    linseData[17] = L.tcx;
+    linseData[18] = L.tcy;
+    linseData[19] = L.zeit;
+    device.queue.writeBuffer(linseBuf, 0, linseData);
+
     const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [{
-        view: ctx.getCurrentTexture().createView(),
+        view: sceneTex.createView(),
         loadOp: 'clear', storeOp: 'store',
         clearValue: { r: 0, g: 0, b: 0, a: 1 },
       }],
@@ -328,6 +466,20 @@ export async function createRendererGPU(canvas, view) {
       pass.draw(ln.nTotal - ln.nMesh, 1, ln.nMesh);
     }
     pass.end();
+
+    // Post-Process: Linse + Fahrt auf den Screen
+    const post = enc.beginRenderPass({
+      colorAttachments: [{
+        view: ctx.getCurrentTexture().createView(),
+        loadOp: 'clear', storeOp: 'store',
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+      }],
+    });
+    post.setBindGroup(0, bindGroup);
+    post.setBindGroup(1, bindPost);
+    post.setPipeline(pipePost);
+    post.draw(3);
+    post.end();
     device.queue.submit([enc.finish()]);
   }
 
@@ -336,8 +488,10 @@ export async function createRendererGPU(canvas, view) {
     dispose() {
       instBuf.destroy();
       lineBuf.destroy();
+      linseBuf.destroy();
       uniform.destroy();
       atlasTex.destroy();
+      sceneTex.destroy();
       device.destroy();
     },
   };

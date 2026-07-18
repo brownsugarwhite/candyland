@@ -77,6 +77,7 @@ export function createSwarm(gitter, defaultShape, tNow = 0) {
   store.meshEnabled = CONFIG.neural.enabled;
   store.edges = gitter.edges;
   store.extraLines = []; // [x0,y0,x1,y1, r,g,b,a] je Linie (0..1) — pro Frame
+  store.linse = { holes: [], tunnelT: 0, tcx: 0, tcy: 0, zeit: 0 }; // Post-FX
   store.freeList = new Int32Array(n - gitter.latticeCount);
   let w = 0;
   for (let i = n - 1; i >= gitter.latticeCount; i--) store.freeList[w++] = i;
@@ -346,22 +347,23 @@ export function postStep(store, tSim, dtFrame, env) {
       // Wurmloch-Ordner: kreisrunde Löcher im Netz (Referenz 06) —
       // Innen-Agenten stauen sich als Ring am Rand, der Trichter dimmt
       if (env.holes) {
-        const WL = CONFIG.wurmloch;
         for (const hole of env.holes) {
           const dx = hx - hole.x, dy = hy - hole.y;
           const d = Math.sqrt(dx * dx + dy * dy) || 1e-3;
-          const R = hole.r || WL.r;
+          const R = hole.r || CONFIG.tunnel.r;
           if (d < R) {
+            // innen leer: Agenten stauen sich knapp außerhalb des Rings —
+            // dort verbiegt sie die Gravitationslinse zu Bögen
             const f = d / R;
-            tx = hole.x + (dx / d) * (R + f * WL.rim);
-            ty = hole.y + (dy / d) * (R + f * WL.rim);
-            shrink *= 0.3 + 0.5 * f;
-          } else if (d < R + WL.feather) {
-            const g = 1 - (d - R) / WL.feather;
-            const push = g * g * 0.45;
+            tx = hole.x + (dx / d) * (R + 0.12 + f * 0.4);
+            ty = hole.y + (dy / d) * (R + 0.12 + f * 0.4);
+            shrink *= 0.35 + 0.45 * f;
+          } else if (d < R + 2.4) {
+            const g = 1 - (d - R) / 2.4;
+            const push = g * g * 0.4;
             tx += (dx / d) * push;
             ty += (dy / d) * push;
-            shrink *= 1 - 0.22 * g * g;
+            shrink *= 1 - 0.2 * g * g;
           }
         }
       }

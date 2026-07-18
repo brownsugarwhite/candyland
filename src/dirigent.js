@@ -208,11 +208,11 @@ export function createDirigent(store, kamera) {
           : 'api-key einfügen (⌘v) und enter drücken');
         return;
       }
-      if (tl === 'ordner') {
+      if (tl === 'tunnel' || tl === 'ordner') {
         const r = feld.rect;
         const hx = (r.x0 + r.x1) / 2, hy = (r.y0 + r.y1) / 2;
         feld.close();
-        createOrdner(hx, hy);
+        createTunnel(hx, hy);
         return;
       }
       if (tl === '2048') {
@@ -479,141 +479,216 @@ export function createDirigent(store, kamera) {
     }
   }
 
-  // ---- Wurmloch-Ordner (Referenz 06): Löcher im Netz + Dimensionsreise --
+  // ---- TUNNEL: Schwarze-Loch-Ordner mit echter Gravitationslinse --------
+  // Die Verzerrung liegt im Post-Process der Renderer (store.linse):
+  // Punktmassen-Linsengleichung β = θ − θE²/θ um jeden Tunnel, innen der
+  // Ereignishorizont, dazu der Ring-Glow. Hier leben Platzierung (Drag),
+  // Label + Dreiecks-Marker und die REISE: Kamera-Anflug (Linse zieht an)
+  // → Lichtgeschwindigkeits-Fahrt (radiale Aberration + Sternstreifen)
+  // → Ankunft als Wasser-Ringwelle in der anderen Dimension.
   const dimHoles = [[], []];
   let dim = 0;
-  let reise = null; // { phase: 'flug'|'welle', t0, hole, scale0, cx0, cy0 }
-  const holeRings = new Map(); // hole → [agent-ids]
+  let reise = null;      // { phase, t0, hole, scale0, cx0, cy0, switched }
+  let holeDrag = null;   // { hole, lastX, lastY, movedPx }
+  let lenseBoost = 1;    // animierte Linsenstärke
+  let tunnelT = 0;       // 0..1 — Stärke der Lichtgeschwindigkeits-Fahrt
+  let suppressClick = 0;
 
-  function ringHole(hole) {
-    const WL = CONFIG.wurmloch;
-    const ids = [];
-    for (let k = 0; k < WL.ringDots; k++) {
-      const id = allocReserve(store, hole.x, hole.y);
-      if (id < 0) break;
-      wakeAgent(store, id, tNow, 0.1 + k * 0.05, {
-        size: 0.02, shape: CIRCLE, swirl: false,
-        px: hole.x, py: hole.y,
+  function formHoleLabel(hole) {
+    const T = CONFIG.tunnel;
+    const res = formText(hole.name, {
+      x: hole.x, y: hole.y + hole.r * 0.30, h: T.labelH,
+      align: 'center', color: [235, 244, 239],
+    });
+    hole.labelIds = res.ids;
+    const tri = allocReserve(store, hole.x, hole.y + hole.r * 0.72);
+    if (tri >= 0) {
+      wakeAgent(store, tri, tNow, 0.2, {
+        size: 0.02, shape: 2, swirl: false, // analytisches Dreieck
+        px: hole.x, py: hole.y + hole.r * 0.72,
       });
-      store.state[id] = STATE.TEXT;
-      store.tgtR[id] = store.baseTint[0] * 0.85;
-      store.tgtG[id] = store.baseTint[1] * 0.85;
-      store.tgtB[id] = store.baseTint[2] * 0.85;
-      ids.push(id);
-    }
-    holeRings.set(hole, ids);
-    store.needsRebuild = true;
-  }
-
-  function clearRings() {
-    for (const ids of holeRings.values()) dissolveIds(ids);
-    holeRings.clear();
-  }
-
-  function ringsUpdate(t) {
-    const WL = CONFIG.wurmloch;
-    const dotSize = WL.ringDotPx / kamera.scale;
-    for (const [hole, ids] of holeRings) {
-      for (let k = 0; k < ids.length; k++) {
-        const id = ids[k];
-        if (store.active[id] === 0) continue;
-        const a = (k / ids.length) * Math.PI * 2 + t * WL.ringSpin;
-        store.targetX[id] = hole.x + Math.cos(a) * (hole.r + 0.28);
-        store.targetY[id] = hole.y + Math.sin(a) * (hole.r + 0.28);
-        store.sizeTgt[id] = dotSize;
-      }
+      store.state[tri] = STATE.TEXT;
+      store.sizeTgt[tri] = 0.4;
+      store.tgtR[tri] = 235;
+      store.tgtG[tri] = 244;
+      store.tgtB[tri] = 239;
+      hole.triId = tri;
+      store.needsRebuild = true;
     }
   }
 
-  function createOrdner(x, y, name) {
-    const hole = { x, y, r: CONFIG.wurmloch.r, name: name || 'ordner' };
+  function clearHoleLabel(hole) {
+    if (hole.labelIds) dissolveIds(hole.labelIds);
+    if (hole.triId >= 0) revert(hole.triId);
+    hole.labelIds = null;
+    hole.triId = -1;
+  }
+
+  function moveHole(hole, dx, dy) {
+    hole.x += dx;
+    hole.y += dy;
+    const ids = [...(hole.labelIds || [])];
+    if (hole.triId >= 0) ids.push(hole.triId);
+    for (const id of ids) {
+      if (store.active[id] === 0) continue;
+      store.homeX[id] += dx;
+      store.homeY[id] += dy;
+      store.targetX[id] += dx;
+      store.targetY[id] += dy;
+      store.posX[id] += dx;
+      store.posY[id] += dy;
+    }
+  }
+
+  function createTunnel(x, y, name) {
+    const hole = {
+      x, y, r: CONFIG.tunnel.r, name: name || 'tunnel',
+      labelIds: null, triId: -1,
+    };
     dimHoles[dim].push(hole);
-    ringHole(hole);
-    showNote(`ordner entsteht — klick hinein öffnet das wurmloch`);
+    formHoleLabel(hole);
+    showNote('tunnel entsteht — drag verschiebt ihn, klick reist hindurch');
   }
 
   function holeAt(wx, wy) {
     for (const h of dimHoles[dim]) {
       const dx = wx - h.x, dy = wy - h.y;
-      if (dx * dx + dy * dy < (h.r + 0.35) ** 2) return h;
+      if (dx * dx + dy * dy < (h.r * 1.15) ** 2) return h;
     }
     return null;
   }
 
+  // Drag verschiebt den Tunnel, ein ruhiger Klick reist hindurch
+  function holePointerDown(wx, wy) {
+    if (activeApp || reise || feld.isOpen || karte.isOpen) return false;
+    const hole = holeAt(wx, wy);
+    if (!hole) return false;
+    holeDrag = { hole, lastX: wx, lastY: wy, movedPx: 0 };
+    return true;
+  }
+
+  function holePointerDrag(wx, wy) {
+    if (!holeDrag) return false;
+    const dx = wx - holeDrag.lastX, dy = wy - holeDrag.lastY;
+    holeDrag.movedPx += Math.hypot(dx, dy) * kamera.scale;
+    moveHole(holeDrag.hole, dx, dy);
+    holeDrag.lastX = wx;
+    holeDrag.lastY = wy;
+    return true;
+  }
+
+  function holePointerUp() {
+    if (!holeDrag) return;
+    const { hole, movedPx } = holeDrag;
+    holeDrag = null;
+    suppressClick = tNow + 0.3;
+    if (movedPx < CONFIG.tunnel.dragMin) startReise(hole);
+  }
+
   function startReise(hole) {
     if (reise) return;
-    clearRings();
+    clearHoleLabel(hole);
     reise = {
-      phase: 'flug', t0: tNow, hole,
+      phase: 'anflug', t0: tNow, hole, switched: false,
       scale0: kamera.scale, cx0: kamera.cx, cy0: kamera.cy,
     };
   }
 
   function dimensionsWechsel(hole) {
-    const WL = CONFIG.wurmloch;
+    const T = CONFIG.tunnel;
     dim = 1 - dim;
     if (!dimHoles[dim].some((h) => Math.hypot(h.x - hole.x, h.y - hole.y) < 1)) {
-      dimHoles[dim].push({ x: hole.x, y: hole.y, r: WL.r, name: 'zurück' });
+      dimHoles[dim].push({
+        x: hole.x, y: hole.y, r: T.r,
+        name: dim === 1 ? 'zurück' : hole.name,
+        labelIds: null, triId: -1,
+      });
     }
-    store.baseTint = [...WL.dims[dim].tint];
-    CONFIG.wellen.omega = WL.dims[dim].omega;
-    // Aufbau als WASSERWELLE: jeder Agent erwacht an seinem Platz, wenn
+    store.baseTint = [...T.dims[dim].tint];
+    CONFIG.wellen.omega = T.dims[dim].omega;
+    // Ankunft als WASSERWELLE: jeder Agent erwacht an seinem Platz, wenn
     // ihn der Ring vom Loch aus erreicht — wie ein Stein im Wasser
     for (const i of store.carrierList) {
       if (store.state[i] > STATE.RETURNING) continue;
       const dx = store.homeX[i] - hole.x, dy = store.homeY[i] - hole.y;
       const d = Math.hypot(dx, dy) || 1e-3;
       store.active[i] = 1;
-      store.posX[i] = store.homeX[i] - (dx / d) * 0.55; // leicht einwärts …
-      store.posY[i] = store.homeY[i] - (dy / d) * 0.55; // … Welle drückt raus
+      store.posX[i] = store.homeX[i] - (dx / d) * 0.55;
+      store.posY[i] = store.homeY[i] - (dy / d) * 0.55;
       store.velX[i] = 0;
       store.velY[i] = 0;
       store.size[i] = 0.02;
       store.state[i] = STATE.RETURNING;
       store.frozen[i] = 0;
-      store.activateAt[i] = tNow + 0.15 + d / WL.welleSpeed;
+      store.activateAt[i] = tNow + 0.15 + d / T.welleSpeed;
       store.tgtR[i] = store.baseTint[0];
       store.tgtG[i] = store.baseTint[1];
       store.tgtB[i] = store.baseTint[2];
       store.brightness[i] = 0;
     }
     store.needsRebuild = true;
-    // Kamera wieder normal — zentriert überm Loch, dann Welle
+    // Kamera zentriert überm Ausgangs-Loch der neuen Dimension
+    kamera.setView(hole.x, hole.y, reise.scale0);
     kamera.snapClamped(reise.scale0);
-    showNote(dim === 1 ? 'neue dimension — das loch führt zurück' : 'wieder zuhause');
+    showNote(dim === 1 ? 'neue dimension — der tunnel führt zurück' : 'wieder zuhause');
   }
 
   function reiseUpdate(t) {
     if (!reise) return;
-    const WL = CONFIG.wurmloch;
+    const T = CONFIG.tunnel;
     const H = reise.hole;
-    if (reise.phase === 'flug') {
-      // Kamera GLEITET durchs Loch: Zoom + Zentrum wandern zum Loch
-      const p = Math.min(1, (t - reise.t0) / WL.flugSec);
+    if (reise.phase === 'anflug') {
+      // Anflug: die Kamera nähert sich, die Raumkrümmung zieht sichtbar an
+      const p = Math.min(1, (t - reise.t0) / T.anflugSec);
       const e = p * p * (3 - 2 * p);
-      const scale = reise.scale0 * Math.pow(WL.flugZoom, e * e);
       kamera.setView(
         reise.cx0 + (H.x - reise.cx0) * e,
         reise.cy0 + (H.y - reise.cy0) * e,
-        scale,
+        reise.scale0 * (1 + 0.9 * e * e),
       );
-      // der Schwarm strudelt sanft ins Loch und verblasst
-      for (const i of store.carrierList) {
-        if (store.active[i] === 0 || store.state[i] > STATE.RETURNING) continue;
-        const dx = store.targetX[i] - H.x, dy = store.targetY[i] - H.y;
-        store.targetX[i] = H.x + dx * (1 - 0.5 * e) - dy * 0.35 * e;
-        store.targetY[i] = H.y + dy * (1 - 0.5 * e) + dx * 0.35 * e;
-        store.brightness[i] *= 1 - 0.75 * e;
+      lenseBoost = 1 + (T.anflugLense - 1) * e;
+      if (p >= 1) {
+        reise.phase = 'fahrt';
+        reise.t0 = t;
+      }
+    } else if (reise.phase === 'fahrt') {
+      // Lichtgeschwindigkeit: Aberration + Sternstreifen (Post-Process),
+      // auf halber Strecke wechselt die Dimension hinter dem Licht
+      const p = Math.min(1, (t - reise.t0) / T.tunnelSec);
+      const halb = p < 0.5 ? p * 2 : (1 - p) * 2;
+      tunnelT = halb * halb * (3 - 2 * halb);
+      lenseBoost = Math.max(1, T.anflugLense * (1 - p));
+      if (!reise.switched && p >= 0.5) {
+        reise.switched = true;
+        dimensionsWechsel(H);
       }
       if (p >= 1) {
-        dimensionsWechsel(H);
+        tunnelT = 0;
         reise.phase = 'welle';
         reise.t0 = t;
       }
-    } else if (t > reise.t0 + WL.welleSec) {
+    } else if (t > reise.t0 + T.welleSec) {
+      lenseBoost = 1;
       reise = null;
-      for (const h of dimHoles[dim]) ringHole(h);
+      for (const h of dimHoles[dim]) {
+        if (!h.labelIds) formHoleLabel(h);
+      }
     }
+  }
+
+  // Post-Process-Uniforms: Löcher in Screen-px + Fahrt-Zustand
+  function linseUpdate(t) {
+    const L = store.linse;
+    L.holes.length = 0;
+    const sichtbar = activeApp ? [] : (reise ? [reise.hole] : dimHoles[dim]);
+    for (const h of sichtbar) {
+      const sp = kamera.worldToScreen(h.x, h.y);
+      L.holes.push({ sx: sp.x, sy: sp.y, thetaE: h.r * kamera.scale * lenseBoost });
+    }
+    L.tunnelT = tunnelT;
+    L.tcx = kamera.viewW / 2;
+    L.tcy = kamera.viewH / 2;
+    L.zeit = t;
   }
 
   // ---- Apps (der Schwarm morpht zum Screen) ------------------------------
@@ -679,11 +754,7 @@ export function createDirigent(store, kamera) {
       dissolveBrain();
       return;
     }
-    const hole = holeAt(w.x, w.y);
-    if (hole) {
-      startReise(hole);
-      return;
-    }
+    if (tNow < suppressClick || holeAt(w.x, w.y)) return;
     const hovered = auswahl.hovered;
     if (hovered >= 0) {
       if (logo.isClaw(hovered)) { // Rex ist immer erreichbar
@@ -764,7 +835,7 @@ export function createDirigent(store, kamera) {
     karte.update(t);
     if (activeApp) activeApp.update(t, cursor);
     reiseUpdate(t);
-    ringsUpdate(t);
+    linseUpdate(t);
 
     if (thinkIds.length > 0) {
       const b = 0.5 + 0.5 * Math.sin(t * 4);
@@ -811,16 +882,19 @@ export function createDirigent(store, kamera) {
     },
     onPointerDown(sx, sy) {
       if (feld.isOpen) return false; // Prompt-Eingabe: nicht malen/zeichnen
-      if (!activeApp || !activeApp.onPointerDown) return false;
       const w = kamera.screenToWorld(sx, sy);
+      if (holePointerDown(w.x, w.y)) return true;
+      if (!activeApp || !activeApp.onPointerDown) return false;
       return activeApp.onPointerDown(w.x, w.y);
     },
     onPointerDrag(sx, sy) {
-      if (!activeApp || !activeApp.onPointerDrag) return;
       const w = kamera.screenToWorld(sx, sy);
+      if (holePointerDrag(w.x, w.y)) return;
+      if (!activeApp || !activeApp.onPointerDrag) return;
       activeApp.onPointerDrag(w.x, w.y);
     },
     onPointerUp() {
+      holePointerUp();
       if (activeApp && activeApp.onPointerUp) activeApp.onPointerUp();
     },
     get text() { return feld.text; },
@@ -844,7 +918,7 @@ export function createDirigent(store, kamera) {
       if (brainRect) return brainRect;
       return null;
     },
-    get holes() { return activeApp || reise ? null : dimHoles[dim]; },
+    get holes() { return activeApp ? null : (reise ? [reise.hole] : dimHoles[dim]); },
     get dim() { return dim; },
     get brainBusy() { return brainBusy; },
     agentName, taskLines,

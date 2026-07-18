@@ -36,7 +36,8 @@ export function createLogo(store, registerTask, kamera) {
   }
 
   function form(tNow) {
-    if (formed || gone) return;
+    return; // Logo vorerst entfernt — nur die Claws (Rex) bleiben
+    /* eslint-disable no-unreachable */
     'LUDI'.split('').forEach((ch, k) => {
       const p = letterPos(k);
       const id = allocReserve(store, p.x, p.y);
