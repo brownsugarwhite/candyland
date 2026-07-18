@@ -102,7 +102,7 @@ struct LOut { @builtin(position) pos: vec4f, @location(0) col: vec4f };
 // Die Fahrt streckt das Szenenlicht radial (Aberration) + Sternstreifen.
 struct Linse {
   holes: array<vec4f, 4>, // sx, sy, thetaE, aktiv
-  fx: vec4f,              // tunnelT, tcx, tcy, zeit
+  fx: vec4f,              // rotWinkel, tcx, tcy, smear
   par: vec4f,             // horizonFrac, lenseReich, ringGlow, –
   ringCol: vec4f,
 };
@@ -125,10 +125,28 @@ fn szene(px: vec2f) -> vec3f {
     clamp(px / cam.view, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
 }
 
+fn hintergrund(px: vec2f) -> vec3f {
+  let d = px - cam.view * 0.5;
+  let r = length(d) / (0.55 * length(cam.view));
+  return mix(cam.inner.rgb, cam.outer.rgb, smoothstep(0.15, 1.0, r));
+}
+
 @fragment fn fsPost(in: PostOut) -> @location(0) vec4f {
   // sichtbarer Bereich des Fullscreen-Dreiecks: uv ∈ 0..1
-  let px = in.uv * cam.view;
+  var px = in.uv * cam.view;
+
+  // Durchflug: die ganze Sicht ROLLT um die Bildmitte (2×180°)
+  let rot = linse.fx.x;
+  if (abs(rot) > 0.0005) {
+    let c = linse.fx.yz;
+    let rel = px - c;
+    let cs = cos(rot);
+    let sn = sin(rot);
+    px = c + vec2f(rel.x * cs - rel.y * sn, rel.x * sn + rel.y * cs);
+  }
+
   var veil = 1.0;
+  var bgMix = 0.0;
   var ring = 0.0;
   var pR = px;
   var pG = px;
@@ -150,36 +168,28 @@ fn szene(px: vec2f) -> vec3f {
       pR = mix(pR, h.xy + dir * dR, fall);
       pG = mix(pG, h.xy + dir * dG, fall);
       pB = mix(pB, h.xy + dir * dB, fall);
-      // Strahlen aus dem Horizont bleiben schwarz (Schatten des Lochs)
-      veil *= smoothstep(0.0, tE * 0.6, dG);
+      // Strahlen aus dem Lochinneren zeigen den HIMMEL dahinter —
+      // kein Schatten, keine gekrümmten Zweitbilder von Label/Pfeil
+      bgMix = max(bgMix, 1.0 - smoothstep(tE * 0.92, tE * 1.01, dG));
     }
     let rd = abs(d - tE);
     ring += linse.par.z * (exp(-rd * rd / 3.0) + 0.12 * exp(-rd * rd / 160.0));
   }
   var col = vec3f(szene(pR).r, szene(pG).g, szene(pB).b) * veil;
+  col = mix(col, hintergrund(px), bgMix);
   col += linse.ringCol.rgb * ring;
 
-  let T = linse.fx.x;
-  if (T > 0.004) {
+  // ruhige radiale Aberration während des Durchflugs (kein Geflacker)
+  let sm = linse.fx.w;
+  if (sm > 0.004) {
     let c = linse.fx.yz;
     let rel = px - c;
-    let r = max(length(rel), 1.0);
-    let rn = r / (0.5 * length(cam.view));
-    var smear = vec3f(0.0);
-    for (var k = 0; k < 7; k++) {
-      let t = (f32(k) / 6.0) * T * 0.6;
-      smear += szene(c + rel * (1.0 - t));
+    var smear = col;
+    for (var k = 1; k < 5; k++) {
+      smear += szene(c + rel * (1.0 - (f32(k) / 4.0) * sm * 0.35));
     }
-    smear /= 7.0;
-    col = mix(col, smear, min(1.0, T * 1.5));
-    let a = atan2(rel.y, rel.x);
-    let sektor = floor(a * 60.0);
-    let seed = fract(sin(sektor * 12.9898 + 78.233) * 43758.5453);
-    let lauf = fract(rn * (2.0 + seed * 5.0) - linse.fx.w * (1.5 + 4.0 * T) * (0.5 + seed) + seed * 11.0);
-    var streak = smoothstep(0.72, 0.98, lauf) * step(0.45, seed);
-    streak *= smoothstep(0.05, 0.4, rn) * T;
-    col += mix(vec3f(0.65, 0.82, 1.0), vec3f(1.0), seed) * streak * 1.7;
-    col += vec3f(0.75, 0.87, 1.0) * exp(-rn * rn * 14.0 / (0.2 + T)) * T * 0.9;
+    smear /= 5.0;
+    col = mix(col, smear, min(1.0, sm));
   }
   return vec4f(col, 1.0);
 }
@@ -436,10 +446,10 @@ export async function createRendererGPU(canvas, view) {
       linseData[i * 4 + 2] = L.holes[i].thetaE;
       linseData[i * 4 + 3] = 1;
     }
-    linseData[16] = L.tunnelT;
+    linseData[16] = L.rot || 0;
     linseData[17] = L.tcx;
     linseData[18] = L.tcy;
-    linseData[19] = L.zeit;
+    linseData[19] = L.smear || 0;
     device.queue.writeBuffer(linseBuf, 0, linseData);
 
     const enc = device.createCommandEncoder();

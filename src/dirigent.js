@@ -491,7 +491,8 @@ export function createDirigent(store, kamera) {
   let reise = null;      // { phase, t0, hole, scale0, cx0, cy0, switched }
   let holeDrag = null;   // { hole, lastX, lastY, movedPx }
   let lenseBoost = 1;    // animierte Linsenstärke
-  let tunnelT = 0;       // 0..1 — Stärke der Lichtgeschwindigkeits-Fahrt
+  let reiseRot = 0;      // Sichtrolle während des Durchflugs (0..2π)
+  let reiseSmear = 0;    // ruhige radiale Aberration
   let suppressClick = 0;
 
   function formHoleLabel(hole) {
@@ -501,11 +502,11 @@ export function createDirigent(store, kamera) {
       align: 'center', color: [235, 244, 239],
     });
     hole.labelIds = res.ids;
-    const tri = allocReserve(store, hole.x, hole.y + hole.r * 0.72);
+    const tri = allocReserve(store, hole.x, hole.y + hole.r - 0.21);
     if (tri >= 0) {
       wakeAgent(store, tri, tNow, 0.2, {
         size: 0.02, shape: 2, swirl: false, // analytisches Dreieck
-        px: hole.x, py: hole.y + hole.r * 0.72,
+        px: hole.x, py: hole.y + hole.r - 0.21,
       });
       store.state[tri] = STATE.TEXT;
       store.sizeTgt[tri] = 0.4;
@@ -637,33 +638,65 @@ export function createDirigent(store, kamera) {
     if (!reise) return;
     const T = CONFIG.tunnel;
     const H = reise.hole;
+    const glatt = (p) => p * p * (3 - 2 * p);
     if (reise.phase === 'anflug') {
-      // Anflug: die Kamera nähert sich, die Raumkrümmung zieht sichtbar an
+      // Anflug: ein RUHIGER Kameraflug aufs Loch, die Krümmung zieht an
       const p = Math.min(1, (t - reise.t0) / T.anflugSec);
-      const e = p * p * (3 - 2 * p);
+      const e = glatt(p);
       kamera.setView(
         reise.cx0 + (H.x - reise.cx0) * e,
         reise.cy0 + (H.y - reise.cy0) * e,
-        reise.scale0 * (1 + 0.9 * e * e),
+        reise.scale0 * (1 + 0.65 * e * e),
       );
       lenseBoost = 1 + (T.anflugLense - 1) * e;
       if (p >= 1) {
-        reise.phase = 'fahrt';
+        reise.phase = 'durch';
         reise.t0 = t;
+        reise.scaleIn = kamera.scale;
       }
-    } else if (reise.phase === 'fahrt') {
-      // Lichtgeschwindigkeit: Aberration + Sternstreifen (Post-Process),
-      // auf halber Strecke wechselt die Dimension hinter dem Licht
-      const p = Math.min(1, (t - reise.t0) / T.tunnelSec);
-      const halb = p < 0.5 ? p * 2 : (1 - p) * 2;
-      tunnelT = halb * halb * (3 - 2 * halb);
-      lenseBoost = Math.max(1, T.anflugLense * (1 - p));
-      if (!reise.switched && p >= 0.5) {
+    } else if (reise.phase === 'durch') {
+      // DURCHFLUG: der Schwarm ist als Wurmloch nach innen gestülpt —
+      // die Linse wächst, bis ihre Mündung den ganzen Schirm füllt
+      // (innen sind keine Agenten), die Sicht rollt dabei um 180°.
+      const p = Math.min(1, (t - reise.t0) / T.durchSec);
+      const e = glatt(p);
+      reiseRot = Math.PI * e;
+      reiseSmear = Math.sin(Math.PI * p) * 0.9;
+      // θE wächst vom Loch-Radius bis über die halbe Bilddiagonale
+      const voll = Math.hypot(kamera.viewW, kamera.viewH) * 0.62;
+      const start = H.r * reise.scaleIn * T.anflugLense;
+      reise.thetaOverride = start + (voll - start) * e;
+      kamera.setView(H.x, H.y, reise.scaleIn * (1 + 0.35 * e));
+      if (!reise.switched && p >= 0.92) {
+        // hinter der gefüllten Mündung wechselt still die Dimension
         reise.switched = true;
         dimensionsWechsel(H);
       }
       if (p >= 1) {
-        tunnelT = 0;
+        reise.phase = 'oeffnen';
+        reise.t0 = t;
+      }
+    } else if (reise.phase === 'oeffnen') {
+      // ANDERE SEITE: das Wurmloch öffnet sich — die Mündung zieht sich
+      // auf den Rückweg-Tunnel zusammen, die Rolle vollendet 360°,
+      // man blickt auf den noch gekrümmten Raum, der sich entspannt
+      const p = Math.min(1, (t - reise.t0) / T.oeffnenSec);
+      const e = glatt(p);
+      reiseRot = Math.PI * (1 + e);
+      reiseSmear = (1 - e) * 0.5;
+      // Kamera gleitet auf die Normalansicht zurück, die Mündung zieht
+      // sich auf den Rückweg-Tunnel zusammen
+      const scaleDurch = reise.scaleIn * 1.35;
+      kamera.setView(H.x, H.y, scaleDurch + (reise.scale0 - scaleDurch) * e);
+      const voll = Math.hypot(kamera.viewW, kamera.viewH) * 0.62;
+      const ziel = H.r * reise.scale0;
+      reise.thetaOverride = voll + (ziel - voll) * e;
+      lenseBoost = 1;
+      if (p >= 1) {
+        kamera.snapClamped(reise.scale0);
+        reiseRot = 0;
+        reiseSmear = 0;
+        reise.thetaOverride = 0;
         reise.phase = 'welle';
         reise.t0 = t;
       }
@@ -673,6 +706,8 @@ export function createDirigent(store, kamera) {
       for (const h of dimHoles[dim]) {
         if (!h.labelIds) formHoleLabel(h);
       }
+    } else {
+      lenseBoost = Math.max(1, lenseBoost - (t - reise.t0) * 0.5);
     }
   }
 
@@ -683,9 +718,13 @@ export function createDirigent(store, kamera) {
     const sichtbar = activeApp ? [] : (reise ? [reise.hole] : dimHoles[dim]);
     for (const h of sichtbar) {
       const sp = kamera.worldToScreen(h.x, h.y);
-      L.holes.push({ sx: sp.x, sy: sp.y, thetaE: h.r * kamera.scale * lenseBoost });
+      const theta = reise && reise.thetaOverride
+        ? reise.thetaOverride
+        : h.r * kamera.scale * lenseBoost;
+      L.holes.push({ sx: sp.x, sy: sp.y, thetaE: theta });
     }
-    L.tunnelT = tunnelT;
+    L.rot = reiseRot;
+    L.smear = reiseSmear;
     L.tcx = kamera.viewW / 2;
     L.tcy = kamera.viewH / 2;
     L.zeit = t;

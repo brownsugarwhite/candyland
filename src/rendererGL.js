@@ -52,9 +52,11 @@ in vec2 v_uv;
 uniform sampler2D u_scene;
 uniform vec2 u_view;
 uniform vec4 u_holes[4]; // sx, sy, thetaE(px), aktiv
-uniform vec4 u_fx;       // tunnelT, tcx, tcy, zeit
+uniform vec4 u_fx;       // rotWinkel, tcx, tcy, smear
 uniform vec3 u_ringCol;
 uniform vec3 u_par;      // horizonFrac, lenseReich, ringGlow
+uniform vec3 u_bgInner;
+uniform vec3 u_bgOuter;
 out vec4 outColor;
 
 // Screen-Koordinaten laufen oben-links los; GL-Texturen unten-links —
@@ -64,10 +66,28 @@ vec3 szene(vec2 px) {
   return texture(u_scene, clamp(uv, vec2(0.001), vec2(0.999))).rgb;
 }
 
+// Hintergrundfarbe an einer Screen-Position (wie der Bg-Pass)
+vec3 hintergrund(vec2 px) {
+  vec2 d = px - u_view * 0.5;
+  float r = length(d) / (0.55 * length(u_view));
+  return mix(u_bgInner, u_bgOuter, smoothstep(0.15, 1.0, r));
+}
+
 void main() {
   // sichtbarer Bereich des Fullscreen-Dreiecks: v_uv ∈ 0..1
   vec2 px = vec2(v_uv.x, 1.0 - v_uv.y) * u_view;
+
+  // Durchflug: die ganze Sicht ROLLT um die Bildmitte (2×180°)
+  float rot = u_fx.x;
+  if (abs(rot) > 0.0005) {
+    vec2 c = u_fx.yz;
+    vec2 rel = px - c;
+    float cs = cos(rot), sn = sin(rot);
+    px = c + vec2(rel.x * cs - rel.y * sn, rel.x * sn + rel.y * cs);
+  }
+
   float veil = 1.0;
+  float bgMix = 0.0;
   float ring = 0.0;
 
   // Linsen-Remap (Rot/Grün/Blau minimal verschieden → Aberration)
@@ -92,40 +112,28 @@ void main() {
       pR = mix(pR, h.xy + dir * dR, fall);
       pG = mix(pG, h.xy + dir * dG, fall);
       pB = mix(pB, h.xy + dir * dB, fall);
-      // Strahlen aus dem Horizont bleiben schwarz (Schatten des Lochs)
-      veil *= smoothstep(0.0, tE * 0.6, dG);
+      // Strahlen aus dem Lochinneren zeigen den HIMMEL dahinter —
+      // kein Schatten, keine gekrümmten Zweitbilder von Label/Pfeil
+      bgMix = max(bgMix, 1.0 - smoothstep(tE * 0.92, tE * 1.01, dG));
     }
     float rd = abs(d - tE);
     ring += u_par.z * (exp(-rd * rd / 3.0) + 0.12 * exp(-rd * rd / 160.0));
   }
   vec3 col = vec3(szene(pR).r, szene(pG).g, szene(pB).b) * veil;
+  col = mix(col, hintergrund(px), bgMix);
   col += u_ringCol * ring;
 
-  // Wurmloch-Fahrt
-  float T = u_fx.x;
-  if (T > 0.004) {
+  // ruhige radiale Aberration während des Durchflugs (kein Geflacker)
+  float sm = u_fx.w;
+  if (sm > 0.004) {
     vec2 c = u_fx.yz;
     vec2 rel = px - c;
-    float r = max(length(rel), 1.0);
-    float rn = r / (0.5 * length(u_view));
-    // Licht der echten Szene radial nach vorn gestreckt (Aberration)
-    vec3 smear = vec3(0.0);
-    for (int k = 0; k < 7; k++) {
-      float t = (float(k) / 6.0) * T * 0.6;
-      smear += szene(c + rel * (1.0 - t));
+    vec3 smear = col;
+    for (int k = 1; k < 5; k++) {
+      smear += szene(c + rel * (1.0 - (float(k) / 4.0) * sm * 0.35));
     }
-    smear /= 7.0;
-    col = mix(col, smear, min(1.0, T * 1.5));
-    // Sternstreifen: pro Winkelsektor ein Lichtfaden, beschleunigend
-    float a = atan(rel.y, rel.x);
-    float sektor = floor(a * 60.0);
-    float seed = fract(sin(sektor * 12.9898 + 78.233) * 43758.5453);
-    float lauf = fract(rn * (2.0 + seed * 5.0) - u_fx.w * (1.5 + 4.0 * T) * (0.5 + seed) + seed * 11.0);
-    float streak = smoothstep(0.72, 0.98, lauf) * step(0.45, seed);
-    streak *= smoothstep(0.05, 0.4, rn) * T;
-    col += mix(vec3(0.65, 0.82, 1.0), vec3(1.0), seed) * streak * 1.7;
-    // Glut im Zentrum
-    col += vec3(0.75, 0.87, 1.0) * exp(-rn * rn * 14.0 / (0.2 + T)) * T * 0.9;
+    smear /= 5.0;
+    col = mix(col, smear, min(1.0, sm));
   }
   outColor = vec4(col, 1.0);
 }`;
@@ -279,6 +287,12 @@ export function createRendererGL(canvas, view) {
   gl.uniform3f(gl.getUniformLocation(progPost, 'u_ringCol'), 0.72, 0.79, 0.76);
   gl.uniform3f(gl.getUniformLocation(progPost, 'u_par'),
     CONFIG.tunnel.horizon, CONFIG.tunnel.lense, CONFIG.tunnel.ringGlow);
+  {
+    const bi = hexToRgb01(CONFIG.colors.bgInner);
+    const bo = hexToRgb01(CONFIG.colors.bgOuter);
+    gl.uniform3f(gl.getUniformLocation(progPost, 'u_bgInner'), bi[0], bi[1], bi[2]);
+    gl.uniform3f(gl.getUniformLocation(progPost, 'u_bgOuter'), bo[0], bo[1], bo[2]);
+  }
   const uHoles = gl.getUniformLocation(progPost, 'u_holes');
   const uFx = gl.getUniformLocation(progPost, 'u_fx');
   const vaoPost = gl.createVertexArray();
@@ -410,7 +424,7 @@ export function createRendererGL(canvas, view) {
     }
     gl.useProgram(progPost);
     gl.uniform4fv(uHoles, holeArr);
-    gl.uniform4f(uFx, L.tunnelT, L.tcx, L.tcy, L.zeit);
+    gl.uniform4f(uFx, L.rot || 0, L.tcx, L.tcy, L.smear || 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, sceneTex);
     gl.bindVertexArray(vaoPost);
