@@ -43,12 +43,29 @@
   }
   #modi span { color: #c4c9cc; cursor: pointer; transition: color .25s; }
   #modi span.aktiv { color: #16c784; cursor: default; }
-  canvas {
+  #rahmen {
+    position: relative;
     border-radius: 26px;
+    overflow: hidden;
     background: #2b2e31;
+  }
+  #rahmen.resizable { resize: both; }
+  #rahmen.resizable::after { /* dezenter Griff unten rechts */
+    content: '';
+    position: absolute;
+    right: 5px; bottom: 5px;
+    width: 10px; height: 10px;
+    border-right: 2px solid #6b7075;
+    border-bottom: 2px solid #6b7075;
+    border-radius: 2px;
+    pointer-events: none;
+  }
+  canvas {
     cursor: crosshair;
     touch-action: none;
     display: block;
+    width: 100%;
+    height: 100%;
   }
 </style>
 </head>
@@ -58,7 +75,7 @@
     <span id="m-wide">wide</span>
     <span id="m-high">high</span>
   </div>
-  <canvas id="feld"></canvas>
+  <div id="rahmen"><canvas id="feld"></canvas></div>
   <script type="module" src="src/main.js"></script>
 </body>
 </html>

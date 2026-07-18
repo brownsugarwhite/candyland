@@ -369,7 +369,12 @@ export function postStep(store, tSim, dtFrame, env) {
       if (warpCursor) {
         const dx = hx - cur.wx, dy = hy - cur.wy;
         const d2 = dx * dx + dy * dy;
-        if (d2 < cCut2) {
+        if (i === cur.attractId) {
+          // der NÄCHSTE Agent wird magnetisch ANGEZOGEN — so lässt er
+          // sich greifen, statt dem Cursor auszuweichen
+          tx = hx - dx * CW.attract;
+          ty = hy - dy * CW.attract;
+        } else if (d2 < cCut2) {
           const g = Math.exp(-d2 / cSig2);
           const d = Math.sqrt(d2) || 1e-3;
           const off = (cAmpW * g * cur.polarity) / d;

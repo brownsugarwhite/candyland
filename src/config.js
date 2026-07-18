@@ -4,18 +4,20 @@
 // Die Kamera skaliert nur die Darstellung — beim Zoomen ordnet sich nie
 // etwas neu an. Ein Reserve-Pool liefert Agenten für Text, Bilder und Apps.
 export const CONFIG = {
-  // Vorschaumodi: wide (Desktop) und high (Mobile).
-  // start*: das beim Boot sichtbare Fenster in Gitterzellen (lt. Referenz
-  // 01A: 13 Spalten, 01B: 7 Spalten). cols/rows = Gesamtgitter; bei
-  // minimalem Zoom füllt es die Fläche exakt (Referenz 02).
+  // Vorschaumodi: wide (Desktop, per Drag skalierbar) und high (Mobile).
+  // Das LANDING-Raster passt sich dem Screen an: Zellgröße ≈ zellePx,
+  // GERADE Spaltenzahl → Kachel oben links, FREIE Zelle oben rechts
+  // (dort wohnt das Rex-Icon). Referenzen 01A (16×12 @ 50 px) und 01B.
   modes: {
-    wide: { w: 800, h: 600, cols: 72, rows: 54, startCols: 13, startCol0: 30, startRow0: 22 },
-    high: { w: 450, h: 750, cols: 45, rows: 75, startCols: 7, startCol0: 20, startRow0: 32 },
+    wide: { w: 800, h: 600, resizable: true },
+    high: { w: 450, h: 750, resizable: false },
   },
 
   gitter: {
-    agentSize: 1.0,       // Kantenlänge = Lückenbreite (Referenz 01A: eng)
+    zellePx: 50,          // Ziel-Zellgröße beim Landing (Referenz: 800/16)
+    agentSize: 0.78,      // Kachelgröße in Zellen (Referenz: 39/50)
     litParity: 0,         // wach ist die Schachbrett-Hälfte (col+row)%2 === litParity
+    latFaktor: 4,         // Gesamtgitter = latFaktor × Landing-Fenster
   },
 
   pool: { reserve: 260000 }, // Slots für Text/Bilder/Apps (1px-Verdichtung)
@@ -41,6 +43,7 @@ export const CONFIG = {
     sigma: 90,            // zur Laufzeit durch kamera.scale geteilt, damit
     amp: 26,              // sich der Cursor auf jeder Zoomstufe gleich anfühlt
     shrink: 0.45,
+    attract: 0.6,         // der NÄCHSTE Agent wird angezogen (0..1 zum Cursor)
   },
 
   fieldWarp: {            // Eingabefeld/Karte verbiegen den Raum (Screen-px)
@@ -69,8 +72,8 @@ export const CONFIG = {
   },
 
   falloff: {              // radialer Verlauf relativ zur Bildschirmmitte
-    bri: 0.42,            // Rand-Helligkeit = 1 - bri·f(d)
-    size: 0.26,           // Rand-Größe    = 1 - size·f(d)
+    bri: 0.45,            // Rand-Helligkeit = 1 - bri·f(d)  (Referenz: stark)
+    size: 0.08,           // Rand-Größe    = 1 - size·f(d)  (Referenz: subtil)
   },
 
   veil: { feather: 90, dim: 0.42 }, // weicher Inhalts-Schleier (Screen-px)
@@ -111,20 +114,18 @@ export const CONFIG = {
     hoverEase: 10,
   },
 
-  logo: {                 // LUDi oben mittig (Referenz 08) — Offsets in Zellen
-    letterH: 0.52,        // Höhe der Glyph-Agenten L, U (≈ halbe Kachel)
-    dxL: -0.62, dxU: 0.12, dxDi: 1.0, // Offsets von der Viewport-Mitte
-    briLetter: 0.8,
-    briTile: 0.82,
-    zoomHide: 0.86,       // < zoomHide·maxScale → LUDI wird wieder Gitter
+  logo: {                 // LUDI oben mittig (Referenz 08): VIER gleich
+    letterH: 0.34,        // große Buchstaben-Agenten, Abstand 0.45 Zellen,
+    letterGap: 0.45,      // zentriert über der Bildschirmmitte; D und I
+    briLetter: 0.85,      // liegen ÜBER einer normalen Gitter-Kachel
+    dunkel: [56, 60, 64], // Farbe von D, I (dunkel auf heller Kachel)
   },
 
-  claws: {                // Rex-Icon: IMMER oben rechts, IMMER gleich groß
-    sizePx: 36,           // Screen-px (zoom-unabhängig)
-    dxPx: 42, dyPx: 40,   // Abstand von der oberen rechten Screen-Ecke
+  claws: {                // Rex-Icon: fest verankert in der freien Zelle
+    cellFrac: 0.62,       // Größe relativ zur Landing-Zelle (oben rechts)
     bri: 0.62,
-    warpSigmaPx: 58,      // das Gitter weicht dem Icon aus (wie dem Cursor)
-    warpAmpPx: 40,
+    warpSigmaPx: 52,      // das Gitter weicht dem Icon aus (wie dem Cursor)
+    warpAmpPx: 28,
   },
 
   colors: {

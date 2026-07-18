@@ -36,7 +36,7 @@ const COLOR_WORDS = {
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 export function createDirigent(store, kamera) {
-  const cursor = { sx: 0, sy: 0, wx: 0, wy: 0, active: false, polarity: 1 };
+  const cursor = { sx: 0, sy: 0, wx: 0, wy: 0, active: false, polarity: 1, attractId: -1 };
   const AG = CONFIG.colors.agent;
 
   let tNow = 0;
@@ -643,8 +643,16 @@ export function createDirigent(store, kamera) {
   }
 
   // ---- Events ------------------------------------------------------------
+  // Erste Aktion auf dem Landing-Screen: LUDI fügt sich dem Gitter —
+  // außer man klickt einen der Buchstaben selbst an
+  function notifyAction() {
+    logo.dissolveToGrid();
+  }
+
   function onClick(sx, sy) {
     const w = kamera.screenToWorld(sx, sy);
+    const hovNow = auswahl.hovered;
+    if (!(hovNow >= 0 && logo.isLogo(hovNow))) notifyAction();
     if (feld.isOpen && activeApp) {
       if (!feld.near(w.x, w.y)) {
         promptFor = null;
@@ -691,6 +699,7 @@ export function createDirigent(store, kamera) {
   }
 
   function onKey(e) {
+    notifyAction();
     if (feld.isOpen) { // Prompt-Feld einer App hat Vorrang
       if (e.key === 'Escape') { taskFor = null; promptFor = null; }
       return feld.onKey(e);
@@ -748,6 +757,9 @@ export function createDirigent(store, kamera) {
     if (booted) logo.update(t);
 
     auswahl.update(dt, cursor, !feld.isOpen && !activeApp);
+    // der dem Cursor nächste GITTER-Agent wird angezogen statt abgestoßen
+    const hov = auswahl.hovered;
+    cursor.attractId = hov >= 0 && store.state[hov] <= STATE.RETURNING ? hov : -1;
     feld.update(t);
     karte.update(t);
     if (activeApp) activeApp.update(t, cursor);
@@ -836,6 +848,7 @@ export function createDirigent(store, kamera) {
     get dim() { return dim; },
     get brainBusy() { return brainBusy; },
     agentName, taskLines,
+    notifyAction,
     onPointerMove(sx, sy) {
       cursor.sx = sx; cursor.sy = sy;
       const w = kamera.screenToWorld(sx, sy);

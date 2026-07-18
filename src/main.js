@@ -42,7 +42,7 @@ async function createRenderer(view) {
   return createRenderer2D(canvas, view);
 }
 
-async function build(mode) {
+async function build(mode, viewW, viewH) {
   if (world) {
     cancelAnimationFrame(world.raf);
     world.detach();
@@ -50,9 +50,12 @@ async function build(mode) {
     world = null;
   }
 
-  const gitter = buildGitter(mode);
+  const gitter = buildGitter(mode, viewW, viewH);
   canvas.style.width = gitter.view.w + 'px';
   canvas.style.height = gitter.view.h + 'px';
+  const rahmenEl = document.getElementById('rahmen');
+  rahmenEl.style.width = gitter.view.w + 'px';
+  rahmenEl.style.height = gitter.view.h + 'px';
 
   const kamera = createKamera(gitter);
   const wellen = createWellen(gitter);
@@ -186,7 +189,22 @@ async function setMode(m) {
     el.classList.toggle('aktiv', name === m);
   }
   await build(m);
+  document.getElementById('rahmen').classList
+    .toggle('resizable', !!CONFIG.modes[m].resizable);
 }
+
+// Responsiveness-Simulation: das wide-Fenster ist per Drag skalierbar —
+// der Landing-Schwarm passt sich jeder Größe neu an (debounced Rebuild)
+let resizeTimer = 0;
+new ResizeObserver((entries) => {
+  if (!world || !CONFIG.modes[mode].resizable) return;
+  const r = entries[0].contentRect;
+  const w = Math.round(r.width), h = Math.round(r.height);
+  if (w < 240 || h < 200) return;
+  if (w === world.store.gitter.view.w && h === world.store.gitter.view.h) return;
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => build(mode, w, h), 220);
+}).observe(document.getElementById('rahmen'));
 toggles.wide.addEventListener('click', () => mode !== 'wide' && setMode('wide'));
 toggles.high.addEventListener('click', () => mode !== 'high' && setMode('high'));
 
@@ -200,7 +218,11 @@ toggles.high.addEventListener('click', () => mode !== 'high' && setMode('high'))
   ]);
   await document.fonts.ready;
   await initFormen(); // SDF-Atlas (braucht Poppins für Glyphen)
-  await setMode(mode);
+  if (params.has('vw') && CONFIG.modes[mode].resizable) {
+    await build(mode, parseInt(params.get('vw'), 10), parseInt(params.get('vh'), 10) || 600);
+  } else {
+    await setMode(mode);
+  }
   // Screenshot-/Test-Hilfen: ?advance=5 treibt die Simulation vor,
   // ?zoom=min|max zoomt, ?klick=x,y klickt (Screen-px), ?tippe=… tippt.
   const adv = parseFloat(params.get('advance') || '0');

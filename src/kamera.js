@@ -8,13 +8,12 @@ import { CONFIG } from './config.js';
 export function createKamera(gitter) {
   const V = gitter.view;
   const S = gitter.start;
-  const maxScale = V.w / S.cols;                     // Start = maximaler Zoom (01A)
+  const maxScale = S.cell;                           // Landing = maximaler Zoom (01A)
   const minScale = Math.max(V.w / gitter.cols, V.h / gitter.rows); // ganze Fläche (02)
 
-  const startRows = V.h / maxScale;
   const kam = {
-    cx: S.col0 + S.cols / 2,
-    cy: S.row0 + startRows / 2,
+    cx: S.col0 + S.cols / 2,   // Landing-Fenster exakt randbündig zentriert
+    cy: S.row0 + S.rows / 2,
     scale: maxScale,
     scaleTgt: maxScale,
     minScale, maxScale,
@@ -59,6 +58,14 @@ export function createKamera(gitter) {
     zoomAt(sx, sy, factor) {
       kam.scaleTgt = Math.min(kam.maxScale, Math.max(kam.minScale, kam.scaleTgt * factor));
       kam.anchor = { sx, sy };
+    },
+
+    // Navigation: 2-Finger-Geste / mittlere Maustaste verschieben die Welt
+    pan(dxWorld, dyWorld) {
+      kam.cx += dxWorld;
+      kam.cy += dyWorld;
+      kam.anchor = null;
+      clampCenter();
     },
 
     // Wurmloch-Flug: direkte, ungeklemmte Kamerasteuerung (pro Frame)

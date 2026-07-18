@@ -1,19 +1,40 @@
 // Das WELT-GITTER von LUDI. 1 Welteinheit = 1 Zelle; Agentenidentität =
 // Zellindex row*cols+col — stabil für immer, unabhängig von Zoom und Modus.
-// Wach ist nur die Schachbrett-Hälfte (litParity); die dunklen Lücken-Zellen
-// sind schlafende, adressierbare Agenten (dort sitzen Logo-Buchstaben,
-// Claws und Schnellaktionen). Dahinter liegt der Reserve-Pool für
-// Feinraster-Text, Bilder und Apps (Verdichtung bis 1×1 px).
+//
+// LANDING-FIT (Referenz 01A/01B): Das Startfenster passt sich dem Screen
+// an — Zellgröße ≈ CONFIG.gitter.zellePx, GERADE Spalten-/Zeilenzahl,
+// Breite exakt randbündig. Damit hat die Ecke oben LINKS eine Kachel und
+// die Zelle oben RECHTS bleibt frei (Zuhause des Rex-Icons); alle Ränder
+// haben den gleichen Abstand. Dahinter liegt das große Gesamtgitter
+// (latFaktor × Fenster) fürs Zoomen plus der Reserve-Pool.
 import { CONFIG } from './config.js';
 
-export function buildGitter(mode) {
+export function buildGitter(mode, viewW, viewH) {
   const M = CONFIG.modes[mode];
-  const cols = M.cols, rows = M.rows;
+  const w = viewW || M.w;
+  const h = viewH || M.h;
+  const G = CONFIG.gitter;
+
+  // Landing-Fenster: gerade Spaltenzahl, Zelle = Breite/Spalten (exakt)
+  // Spaltenzahl ÷ 4: gerade → freie Ecke oben rechts fürs Rex-Icon, und
+  // C/2 gerade → rechts der Bildschirmmitte liegt IMMER eine Kachel
+  // (Zuhause von D und I). Referenzen: wide 16, high 8.
+  const startCols = Math.max(8, 4 * Math.round(w / G.zellePx / 4));
+  const cell = w / startCols;                    // px pro Zelle beim Landing
+  const startRows = Math.max(4, Math.round(h / cell)); // Zeilen: beste Passung
+
+  // Gesamtgitter + zentriertes Fenster; Parität so, dass die Fenster-Ecke
+  // oben links WACH ist (→ oben rechts frei, dort sitzt Rex)
+  const cols = startCols * G.latFaktor;
+  const rows = startRows * G.latFaktor;
+  const col0 = Math.round((cols - startCols) / 2);
+  let row0 = Math.round((rows - startRows) / 2);
+  if (((col0 + row0) & 1) !== G.litParity) row0 -= 1;
+
   const latticeCount = cols * rows;
   const count = latticeCount + CONFIG.pool.reserve;
-  const lit = CONFIG.gitter.litParity;
+  const lit = G.litParity;
 
-  // carrier = 1: wache Schachbrett-Zelle (das Gitter in Ruhe)
   const carrier = new Uint8Array(count);
   const carrierArr = [];
   for (let r = 0; r < rows; r++) {
@@ -49,7 +70,6 @@ export function buildGitter(mode) {
   }
   const edges = Int32Array.from(edgeArr);
 
-  // Homes: Zellmitten (Welt); Reserve-Homes werden beim Wecken gesetzt
   const homeX = new Float32Array(count);
   const homeY = new Float32Array(count);
   for (let r = 0; r < rows; r++) {
@@ -64,8 +84,8 @@ export function buildGitter(mode) {
     mode, cols, rows, latticeCount, count,
     spacing: 1, lit,
     carrier, carrierList, neighbors, edges, homeX, homeY,
-    view: { w: M.w, h: M.h },
-    start: { col0: M.startCol0, row0: M.startRow0, cols: M.startCols },
+    view: { w, h },
+    start: { col0, row0, cols: startCols, rows: startRows, cell },
   };
 }
 
@@ -92,8 +112,8 @@ export function nearestLit(gitter, wx, wy, maxDist = 0.75) {
   return best;
 }
 
-// Nächste DUNKLE (Lücken-)Zelle zu einem Weltpunkt — für Logo, Claws,
-// Schnellaktionen: Formationen wohnen in den Lücken des Schachbretts.
+// Nächste DUNKLE (Lücken-)Zelle zu einem Weltpunkt — für Formationen,
+// die in den Lücken des Schachbretts wohnen.
 export function nearestGap(gitter, wx, wy) {
   let best = -1, bestD = Infinity;
   const c0 = Math.floor(wx), r0 = Math.floor(wy);
