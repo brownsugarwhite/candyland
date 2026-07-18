@@ -52,7 +52,8 @@ export function project3d(P, kamera, x, y, z, out) {
   }
   const depth = P.hc + rz;
   if (depth < 1.0) { out.hidden = true; return out; } // Near-Plane der Kamera
-  const k = P.h0 / depth;
+  let k = P.h0 / depth;
+  if (P.ortho > 0) k += (1 - k) * P.ortho; // 2d/iso: orthografisch (k → 1)
   out.x = kamera.cx + rx * k;
   out.y = kamera.cy + ry * k;
   out.k = k;
@@ -68,11 +69,14 @@ const PJ_B = { x: 0, y: 0, k: 1, dim: 1, hidden: false };
 // Schwarz) — dim = 1 obenauf, dim = 0 unten = unsichtbar vor dem Grund
 const FOG = hexToRgb01('#31353a');
 
-// Tiefe nur für gebundene Gitteragenten — Label, Claws, App- und
-// Reserve-Agenten schweben als OS-Ebene flach auf z = 0
+// Tiefe eines Agenten: eigene 3D-Höhe (zPos, z. B. Rex' Drahtgitter)
+// plus — für gebundene Gitteragenten — die Wurmloch-Einbettung
 function agentZ(P, store, i) {
-  return i < store.latticeCount && store.state[i] <= STATE.RETURNING
-    ? tiefeAt(P, store.posX[i], store.posY[i]) : 0;
+  const eigen = store.zPos[i];
+  if (i < store.latticeCount && store.state[i] <= STATE.RETURNING) {
+    return eigen + tiefeAt(P, store.posX[i], store.posY[i]);
+  }
+  return eigen;
 }
 
 // Aktive, sichtbare Agenten in arr packen (Kamera-Culling inklusive).
@@ -80,7 +84,7 @@ function agentZ(P, store, i) {
 export function packInstances(store, kamera, arr) {
   const {
     activeList, activeCount, active, posX, posY, size, brightness,
-    colR, colG, colB, rot, shapeA, shapeB, shapeT,
+    colR, colG, colB, rot, shapeA, shapeB, shapeT, aspekt,
   } = store;
   const P = store.p3d;
   const aktiv = !!(P && P.aktiv);
@@ -96,8 +100,8 @@ export function packInstances(store, kamera, arr) {
   let liste = null;
   if (aktiv) {
     liste = [];
-    for (let k = 0; k < activeCount; k++) {
-      const i = activeList[k];
+    for (let kk = 0; kk < activeCount; kk++) {
+      const i = activeList[kk];
       if (active[i] === 0) continue;
       const z = agentZ(P, store, i);
       const rz = P.tilt !== 0 ? P.sinT * (posY[i] - cy) + P.cosT * z : z;
@@ -119,14 +123,15 @@ export function packInstances(store, kamera, arr) {
     let b = brightness[i];
     if (b <= 0.01) continue;
     let px = posX[i], py = posY[i], sz = size[i];
-    let fog = 1, rotV = rot[i], aspect = 1;
+    let fog = 1, rotV = rot[i], aspect = aspekt[i];
     if (aktiv) {
       project3d(P, kamera, px, py, z, PJ_A);
       if (PJ_A.hidden) continue;
-      // ECHTE VERZERRUNG: im Sog strecken sich die Agenten entlang der
-      // Fallrichtung — der lokale Jacobian der Projektion liefert die
-      // radiale Stauchung, tangential bleibt PJ_A.k → Kacheln werden zu
-      // Bögen, während sie ins Loch gezogen werden
+      // ECHTE VERZERRUNG: der Sog zieht die Agenten LÄNGS ins Loch —
+      // sie strecken sich mit dem Gefälle der Raumfläche (Gezeitenkräfte)
+      // in Fallrichtung, tangential schrumpfen sie mit der Perspektive.
+      // Alles stetig: Streckung und Ausrichtung wachsen weich mit dem
+      // Gefälle, nie snappend.
       if (z > 0.04 && P.holes.length > 0) {
         let hx = 0, hy = 0, best = Infinity;
         for (let q = 0; q < P.holes.length; q++) {
@@ -136,15 +141,22 @@ export function packInstances(store, kamera, arr) {
           if (d2 < best) { best = d2; hx = h.x; hy = h.y; }
         }
         const d = Math.sqrt(best) || 1e-3;
-        const step = d > 0.55 ? 0.45 : -0.45; // nahe am Schlund: nach außen
-        const qx = px + ((hx - px) / d) * step;
-        const qy = py + ((hy - py) / d) * step;
-        project3d(P, kamera, qx, qy, tiefeAt(P, qx, qy), PJ_B);
-        if (!PJ_B.hidden) {
+        const dirx = (hx - px) / d, diry = (hy - py) / d;
+        const eps = 0.3;
+        const zIn = tiefeAt(P, px + dirx * eps, py + diry * eps);
+        const gefaelle = Math.max(0, (zIn - z) / eps); // dz Richtung Loch
+        const s = gefaelle / (gefaelle + 2);           // 0..1, weich
+        const ziel = 1 + P.zieh * s;                   // Länge der Streckung
+        // Fallrichtung im Bild (projiziert)
+        project3d(P, kamera, px + dirx * eps, py + diry * eps, zIn, PJ_B);
+        if (!PJ_B.hidden && ziel > 1.02) {
           const jx = PJ_B.x - PJ_A.x, jy = PJ_B.y - PJ_A.y;
-          const radial = Math.hypot(jx, jy) / Math.abs(step);
-          aspect = Math.min(1.5, Math.max(0.1, radial / Math.max(PJ_A.k, 1e-3)));
-          rotV = Math.atan2(jy, jx);
+          const zielRot = Math.atan2(jy, jx);
+          const wGl = Math.min(1, (ziel - 1) * 2); // weiche Rotations-Blende
+          let da = zielRot - rotV;
+          da = Math.atan2(Math.sin(da), Math.cos(da));
+          rotV += da * wGl;
+          aspect *= ziel;
         }
       }
       px = PJ_A.x;

@@ -29,6 +29,15 @@ Diese Regeln sind verbindlich für alles, was in diesem Projekt entsteht.
 
 - **Rex verwaltet den Schwarm** und ist immer über das Claws-Icon oben rechts
   erreichbar (2 Kratzer = 2 Agenten, `assets/svg/claws.svg`).
+- **Klick auf die Claws:** Rex erhebt sich als lebendiges 3D-Käfig-
+  Drahtgitter aus dem Schwarm (`src/rex3d.js`, Modell
+  `assets/obj/rex.obj` samt gewölbter Squircle-Platte als nahtlosem
+  Übergang in den Schwarm). Zwei Catmull-Clark-Schritte glätten den
+  groben Käfig; gezeichnet werden NUR die Ur-Käfigkanten als weiche
+  4-Segment-Kurven (wie ein nicht angewandter Subsurface-Modifier).
+  Knoten = kleine runde Agenten, Kantensegmente = lang gestreckte
+  Agenten; die Drahtdicke wächst perspektivisch zur Kamera. Der Kopf
+  schaut dem Cursor nach. Esc oder Claws-Klick schickt Rex zurück.
 - Rex' Intelligenz ist die Claude-API (`src/brain.js`, Key via „key"-Befehl,
   localStorage). Einzelne Agenten haben lokale, simulierte Autonomie und eine
   Identität (deterministischer Name aus der Agenten-Id, z. B. „Agent Vega 4000").
@@ -110,13 +119,18 @@ Logo tritt beiseite, oben rechts sitzt der pinke Schließen-Agent
 - Renderer-Kaskade WebGPU → WebGL2 → Canvas2D (`?renderer=gl|2d` erzwingt).
   Gemeinsames Instanz-Packing in `src/renderformat.js` — Backends dürfen
   nie auseinanderdriften.
-- **Echtes 3D:** Der Schwarm lebt auf der Ebene z = 0 und läuft IMMER
-  durch eine echte Lochkamera (`renderformat.project3d`, Zustand in
-  `store.p3d`), gelockt senkrecht von oben — für flache Punkte exakt
-  identisch mit der direkten Abbildung, der Grundlook ändert sich also
-  nie. Tiefe (z > 0, z. B. Wurmloch-Tubus) zeigt echte Perspektive und
-  Parallaxe. Befehl `frei` entsperrt die Perspektive (geneigter Blick),
-  nochmal `frei` sperrt zurück; Apps erzwingen die Draufsicht.
+- **Echtes 3D — immer.** Jeder Agent hat eine echte 3D-Position
+  (`store.zPos`, < 0 = über der Fläche) und eine anisotrope Streckung
+  entlang seiner rot-Achse (`store.aspekt`, Instanz-Attribut in beiden
+  GPU-Shadern). Alles läuft IMMER durch die echte Lochkamera
+  (`renderformat.project3d`, Zustand `store.p3d`): Perspektive,
+  Tiefennebel zur Hintergrundfarbe, Maler-Sortierung, Near-Plane.
+  Größen skalieren mit der Kameranähe (Liniendicke wächst zur Kamera).
+- **Kameramodi** (Befehle im Eingabefeld, weich überblendet): Default =
+  GELOCKTE perspektivische Draufsicht — für flache Punkte mathematisch
+  exakt die direkte Abbildung, der Grundlook ändert sich nie. `2d` =
+  echte Orthografie, `iso` = isometrisch, `frei` = geneigte Perspektive;
+  derselbe Befehl sperrt zurück. Apps erzwingen die Draufsicht.
 - Physik: CPU, fixe 120-Hz-Substeps; Struct-of-Arrays; schlafende Slots;
   gesettelte Pixel frieren ein (Early-Out).
 - Test-API im Browser: `__candy.selftest()`, `__candy.advance(sec)`;

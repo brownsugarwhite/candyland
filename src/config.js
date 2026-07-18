@@ -196,12 +196,25 @@ export const CONFIG = {
     neigung: 0.55,        // 1/dimm Zellen); neigung = Kippwinkel (rad) des
   },                      // „frei"-Befehls (Perspektive entsperren)
 
+  rex3d: {                // Rex als Käfig-Drahtgitter (assets/obj/rex.obj):
+    breite: 9,            // Plattenbreite in Zellen (Rex skaliert mit)
+    hebSec: 1.8,          // Erheben aus der Fläche
+    dicke: 0.055,         // Drahtdicke (Zellen) — wächst perspektivisch
+    knoten: 0.11,         // Größe der runden Knoten-Agenten
+    briKante: 0.9,        // Helligkeit Drahtgitter …
+    briKnoten: 1.05,      // … und Knoten
+    kopfZ: -0.5,          // Modell-z, ab dem der Kopf beginnt (Cursor-Blick)
+    maxYaw: 0.5,          // maximale Kopfdrehung (rad)
+  },
+
   tunnel: {               // „Tunnel" = ECHTES 3D-Wurmloch: unendlich tiefer
-    r: 2.2,               // Tubus im Gitter. r = Schlund-Radius (Zellen);
-    tiefe: 6.0,           // Einbettung z = tiefe·(weite/(d−r))^0.8 — je
-    weite: 3.2,           // größer weite, desto weiter reicht die Krümmung
+    r: 1.2,               // Tubus im Gitter. r = Schlund-Radius (Zellen);
+    tiefe: 4.5,           // Einbettung z = tiefe·(weite/(d−r))^0.8 — je
+    weite: 0.9,           // größer weite, desto weiter reicht die Krümmung
+    zieh: 2.8,            // Längs-Streckung der Agenten im Sog (Gezeiten)
+    wuchsSec: 1.4,        // der Trichter wächst weich ein (nie snappend)
     ringAlpha: 0.55,      // feine Ringlinie am Schlundrand
-    labelH: 0.34,         // Namens-Label (Zellen)
+    labelH: 0.30,         // Namens-Label (Zellen)
     dragMin: 10,          // px — mehr Bewegung = Verschieben statt Reise
     flugSec: 2.6,         // EINE durchgehende Einstellung: durch die Röhre,
     saug: 1.8,            //   180° um die Tunnelachse, kein Schnitt; saug =

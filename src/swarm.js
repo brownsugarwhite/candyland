@@ -81,8 +81,12 @@ export function createSwarm(gitter, defaultShape, tNow = 0) {
   store.p3d = { // echte 3D-Lochkamera (renderformat.project3d)
     aktiv: false, holes: [],
     hc: 1, h0: 1, tilt: 0, sinT: 0, cosT: 1,
-    zMax: 26, dimm: 0.12,
+    ortho: 0, zieh: 2.8, zMax: 26, dimm: 0.12,
   };
+  // ECHTES 3D für jeden Agenten: Höhe über der Fläche (zPos < 0 = oben)
+  // und anisotrope Streckung entlang der eigenen rot-Achse
+  store.zPos = new Float32Array(n);
+  store.aspekt = new Float32Array(n).fill(1);
   store.freeList = new Int32Array(n - gitter.latticeCount);
   let w = 0;
   for (let i = n - 1; i >= gitter.latticeCount; i--) store.freeList[w++] = i;
@@ -152,6 +156,8 @@ export function wakeAgent(store, i, tNow, delay, opts = {}) {
   store.brightness[i] = 0;
   store.rot[i] = 0;
   store.hover[i] = 0;
+  store.zPos[i] = 0;
+  store.aspekt[i] = 1;
   store.colR[i] = AG[0] * 0.4; store.colG[i] = AG[1] * 0.4; store.colB[i] = AG[2] * 0.4;
   const shape = opts.shape !== undefined ? opts.shape : store.globalShape;
   store.shapeA[i] = shape;

@@ -15,6 +15,7 @@ import { shapeId, glyphShape } from './formen.js';
 import { askBrain, hasKey, setKey, clearKey } from './brain.js';
 import { generateShape } from './shapes.js';
 import { createLogo } from './logo.js';
+import { createRex3d } from './rex3d.js';
 import { createFeld } from './feld.js';
 import { createAuswahl } from './auswahl.js';
 import { createKarte } from './agentenkarte.js';
@@ -173,6 +174,10 @@ export function createDirigent(store, kamera) {
 
   // ---- Subsysteme --------------------------------------------------------
   const logo = createLogo(store, registerTask, kamera);
+  const rex3d = createRex3d(store, {
+    kamera, registerTask, cursor,
+    dissolveIds: (ids) => dissolveIds(ids),
+  });
   const auswahl = createAuswahl(store, logo);
 
   let taskFor = null; // Auswahl { ids }, für die das Aufgabenfeld offen ist
@@ -209,14 +214,11 @@ export function createDirigent(store, kamera) {
           : 'api-key einfügen (⌘v) und enter drücken');
         return;
       }
-      if (tl === 'frei') {
-        // Perspektive entsperren: die gelockte Draufsicht neigt sich —
-        // man sieht die 3D-Szene (und den Tubus) wirklich von schräg
+      if (tl === 'frei' || tl === '2d' || tl === 'iso') {
+        // Kameramodi: alles IST 3D — hier wird nur die Kamera gelockt
+        // oder entsperrt (perspektivisch/orthografisch/isometrisch)
         feld.close();
-        tiltTgt = tiltTgt > 0 ? 0 : CONFIG.p3d.neigung;
-        showNote(tiltTgt > 0
-          ? 'perspektive entsperrt — „frei" sperrt zurück'
-          : 'perspektive gesperrt — draufsicht');
+        setAnsicht(tl);
         return;
       }
       if (tl === 'tunnel' || tl === 'ordner') {
@@ -507,8 +509,26 @@ export function createDirigent(store, kamera) {
   let reiseSmear = 0;    // ruhige radiale Aberration
   let reiseSaug = 0;     // 0..1 — der Tunnel saugt die Umgebung hinein
   let diveHc = null;     // Kamerahöhe während des Flugs (sonst Ruhehöhe)
-  let tiltTgt = 0;       // „frei": Ziel-Neigung der entsperrten Perspektive
+  // Kameramodi: 'top' = gelockte perspektivische Draufsicht (Default),
+  // '2d' = echte Orthografie, 'iso' = isometrisch, 'frei' = geneigt
+  let ansicht = 'top';
+  let tiltTgt = 0;       // Ziel-Neigung
   let tiltCur = 0;
+  let orthoTgt = 0;      // 0 = perspektivisch, 1 = orthografisch
+  let orthoCur = 0;
+
+  function setAnsicht(name) {
+    ansicht = ansicht === name ? 'top' : name;
+    const A = CONFIG.p3d;
+    tiltTgt = ansicht === 'frei' ? A.neigung : ansicht === 'iso' ? 0.615 : 0;
+    orthoTgt = ansicht === '2d' || ansicht === 'iso' ? 1 : 0;
+    showNote({
+      top: 'draufsicht — gelockte perspektive',
+      '2d': 'echte 2d-ansicht (orthografisch)',
+      iso: 'isometrische ansicht',
+      frei: 'perspektive entsperrt — gleicher befehl sperrt zurück',
+    }[ansicht]);
+  }
   let suppressClick = 0;
   const RP = { x: 0, y: 0, k: 1, dim: 1, hidden: false };
 
@@ -561,7 +581,7 @@ export function createDirigent(store, kamera) {
   function createTunnel(x, y, name) {
     const hole = {
       x, y, r: CONFIG.tunnel.r, name: name || 'tunnel',
-      labelIds: null, triId: -1,
+      born: tNow, labelIds: null, triId: -1,
     };
     dimHoles[dim].push(hole);
     formHoleLabel(hole);
@@ -685,25 +705,35 @@ export function createDirigent(store, kamera) {
     const sichtbar = activeApp ? [] : (reise ? [reise.hole] : dimHoles[dim]);
     // der Sog des Flugs vertieft und weitet die Einbettung — die
     // Schwarmagenten der Umgebung rutschen sichtbar mit in die Röhre
-    const tiefe = T.tiefe * (1 + reiseSaug * T.saug);
+    const glatt = (x) => x * x * (3 - 2 * x);
+    const tiefeBasis = T.tiefe * (1 + reiseSaug * T.saug);
     const weite = T.weite * (1 + reiseSaug * T.saug * 0.5);
     for (const h of sichtbar) {
-      const reich = h.r + weite * 6;
+      // jeder Trichter wächst weich ein — nie snappend
+      const st = glatt(Math.min(1, (t - (h.born || 0)) / T.wuchsSec));
+      if (st <= 0.001) continue;
+      const tiefe = tiefeBasis * st;
+      const reich = h.r + weite * 4;
       P.holes.push({
         x: h.x, y: h.y, r: h.r, tiefe, weite, reich,
         zOff: tiefe * Math.pow(weite / (reich - h.r), 0.8),
       });
     }
+    P.zieh = T.zieh;
     tiltCur += (tiltTgt - tiltCur) * Math.min(1, 5 * dt);
     if (Math.abs(tiltCur) < 0.002 && tiltTgt === 0) tiltCur = 0;
+    orthoCur += (orthoTgt - orthoCur) * Math.min(1, 5 * dt);
+    if (orthoCur < 0.002 && orthoTgt === 0) orthoCur = 0;
     P.h0 = (kamera.viewH / kamera.scale) * CONFIG.p3d.hFac;
     P.hc = diveHc !== null ? diveHc : P.h0;
     P.tilt = tiltCur;
     P.sinT = Math.sin(tiltCur);
     P.cosT = Math.cos(tiltCur);
+    P.ortho = orthoCur;
     P.zMax = CONFIG.p3d.zMax;
     P.dimm = CONFIG.p3d.dimm;
-    P.aktiv = P.holes.length > 0 || tiltCur !== 0 || diveHc !== null;
+    P.aktiv = P.holes.length > 0 || tiltCur !== 0 || diveHc !== null ||
+      rex3d.isOpen;
     for (const h of sichtbar) ringLines(h);
   }
 
@@ -723,7 +753,8 @@ export function createDirigent(store, kamera) {
   function openApp(app) {
     if (activeApp) closeApp();
     if (karte.isOpen) karte.close();
-    tiltTgt = 0; // Apps immer in gesperrter Draufsicht
+    if (ansicht !== 'top') setAnsicht(ansicht); // Apps: gesperrte Draufsicht
+    if (rex3d.isOpen) rex3d.close();
     activeApp = app;
     app.open(tNow);
   }
@@ -774,10 +805,10 @@ export function createDirigent(store, kamera) {
     if (tNow < suppressClick || holeAt(w.x, w.y)) return;
     const hovered = auswahl.hovered;
     if (hovered >= 0) {
-      if (logo.isClaw(hovered)) { // Rex ist immer erreichbar
-        const c = logo.clawCenter();
-        feld.open(c.x - 2.2, c.y + 2.2);
-        showNote('rex hört zu — aufgabe eintippen und enter');
+      if (logo.isClaw(hovered)) {
+        // Rex erhebt sich als 3D-Drahtgitter aus dem Schwarm
+        rex3d.toggle(tNow);
+        if (rex3d.isOpen) showNote('rex ist da — esc oder claws schicken ihn zurück');
         return;
       }
       karte.open(hovered, tNow);
@@ -800,6 +831,7 @@ export function createDirigent(store, kamera) {
       return false;
     }
     if (e.key === 'Escape') {
+      if (rex3d.isOpen) { rex3d.close(); return true; }
       if (karte.isOpen) { karte.close(); return true; }
       if (brainIds.length > 0) { dissolveBrain(); return true; }
       if (glowIds.length > 0) { glowIds = []; return true; }
@@ -853,6 +885,7 @@ export function createDirigent(store, kamera) {
     if (activeApp) activeApp.update(t, cursor);
     reiseUpdate(t);
     linseUpdate(t, dt);
+    rex3d.update(t, dt);
 
     if (thinkIds.length > 0) {
       const b = 0.5 + 0.5 * Math.sin(t * 4);
