@@ -196,30 +196,36 @@ export const CONFIG = {
     neigung: 0.55,        // 1/dimm Zellen); neigung = Kippwinkel (rad) des
   },                      // „frei"-Befehls (Perspektive entsperren)
 
-  rex3d: {                // Rex als Käfig-Drahtgitter (assets/obj/rex.obj):
-    breitePx: 460,        // Plattenbreite in SCREEN-px — Rex bleibt beim
-    hebSec: 1.8,          // Zoomen des Schwarms immer gleich groß
-    dickePx: 2.2,         // Drahtdicke px (weiß, wächst perspektivisch)
-    knotenPx: 4.5,        // Knoten-Agenten px (kreisrund, verschmolzen)
+  rex3d: {                // Rex als zartes Käfig-Drahtgitter (Referenz 12):
+    breitePx: 270,        // Plattenbreite in SCREEN-px — Rex bleibt beim
+    posX: 0.68,           // Zoomen immer gleich groß; Position (Anteil
+    posY: 0.58,           // der Screenfläche, rechts unter der Mitte)
+    hebSec: 1.8,          // Erheben aus der Fläche
+    dickePx: 1.3,         // Drahtdicke px (wächst perspektivisch)
+    knotenPx: 7,          // Platten-Knoten = kleine Squircle-Kacheln;
+    knotenMinPx: 2.5,     //   am Körper werden die Knoten fast unsichtbar
+    briPlatte: 0.75,      // Draht-Helligkeit der Platte …
+    briKoerper: 1.05,     // … und des Körpers (heller)
     kopfAb: 0.15,         // Modell-z, ab dem der Kopf beginnt …
     kopfSpan: 0.7,        // … und wie weich er in den Körper übergeht
     maxYaw: 0.5,          // maximale Kopfdrehung zum Cursor (rad)
+    atmen: 0.014,         // subtiles Atmen des Drahtgitters (·Breite)
   },
 
-  tunnel: {               // „Tunnel" = Schwarzes Loch (Referenz 10): Welt-
-    r: 1.5,               // Warp, überall gleich. r = Ring; gap = leerer
-    gap: 0.45,            // Abstand Ring ↔ erste Bögen; reich = Krümmungs-
-    reich: 2.4,           // Reichweite jenseits des Gaps (Zellen);
-    kruemm: 2.6,          // Verdichtungs-Exponent am Ring;
-    bogen: 2.4,           // tangentiale Bogen-Streckung der ersten Reihe
+  tunnel: {               // „Tunnel" = Schwarzes Loch mit ECHTER Gravita-
+    r: 1.5,               // tionslinse (Referenz 10). r = Einstein-Radius
+    schluck: 1.3,         // θE (Zellen) = Ring; ·r = leere Quellfläche;
+    zug: 2.6,             // Welt-Verdichtung: Reichweite jenseits schluck
+    kruemm: 1.6,          // und Exponent — die BÖGEN macht die Linse
+    linse: 3.0,           // Linsen-Reichweite in θE (Post-Shader)
     wuchsSec: 1.4,        // das Loch wächst weich ein (nie snappend)
-    ringAlpha: 0.6,       // feine Ringlinie
+    ringAlpha: 0.6,       // feine Ringlinie (mint, im Shader)
     labelH: 0.30,         // Namens-Label (Zellen)
     dragMin: 10,          // px — mehr Bewegung = Verschieben statt Reise
     flugSec: 2.6,         // Reise: Kamera fliegt smooth hinein, 180° echte
-    saug: 1.6,            //   3D-Drehung um die vertikale Achse, Ankunft
+    saug: 0.8,            //   3D-Drehung um die vertikale Achse, Ankunft
     welleKick: 2.2,       //   mit schneller Justier-Welle; saug = Zusatz-
-  },                      //   Krümmung während des Flugs
+  },                      //   Sog während des Flugs
 
   malen: {                // Paint (Referenz 05) — Offsets in Zellen vom Rahmen
     canvas: { dx: 2.3, dy: 2.5, w: 5.6, h: 3.5 }, // weiße Fläche (1px-Agenten)

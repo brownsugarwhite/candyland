@@ -25,38 +25,31 @@ export const INST_FLOATS = 12;
 // ist (kein Tunnel, keine Neigung, kein Flug), läuft der schnelle
 // Originalpfad ganz ohne Projektion.
 
-// SCHWARZES LOCH (Referenz 10): Welt-Warp um jeden Tunnel — überall
-// exakt gleich, unabhängig von der Kameraposition. Die Kacheln rutschen
-// auf den Ring zu, verdichten sich, krümmen sich tangential zu Bögen
-// und bleiben IMMER außerhalb des leeren Gap-Rings; innen ist NICHTS.
-// h.st blendet den Warp weich ein (nie snappend).
+// SCHWARZES LOCH, Weltebene: sorgt dafür, dass die QUELLFLÄCHE des
+// Lochs immer komplett leer ist (Agenten innerhalb schluck·r werden
+// weich verschluckt) und verdichtet die Umgebung sanft Richtung Ring.
+// Die ECHTE Linsenverzerrung (gekrümmte Bögen) passiert danach pro
+// Pixel im Post-Shader (Punktmassen-Linse) — dieser Warp liefert ihr
+// nur eine saubere, leere Quelle. h.st blendet weich ein, nie snappend.
 export function lochWarp(P, x, y, out) {
-  out.x = x; out.y = y; out.f = 1; out.str = 1;
-  out.rot = 0; out.blend = 0; out.hidden = false;
+  out.x = x; out.y = y; out.f = 1; out.hidden = false;
   const holes = P.holes;
   for (let k = 0; k < holes.length; k++) {
     const h = holes[k];
     const dx = out.x - h.x, dy = out.y - h.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 1e-4;
     if (d >= h.reich) continue;
-    if (d <= h.gapR) {
-      // verschluckt — das Innere ist immer komplett leer
+    if (d <= h.schluck) {
+      // verschluckt — die Quellfläche der Linse ist immer leer
       out.f *= Math.max(0, 1 - h.st * 1.5);
       if (out.f <= 0.02) { out.hidden = true; return out; }
       continue;
     }
-    const u = (d - h.gapR) / (h.reich - h.gapR); // 0 am Gap-Ring … 1 außen
-    const rp = h.gapR + (h.reich - h.gapR) * Math.pow(u, h.kruemm);
+    const u = (d - h.schluck) / (h.reich - h.schluck); // 0 innen … 1 außen
+    const rp = h.schluck + (h.reich - h.schluck) * Math.pow(u, h.kruemm);
     out.x += ((h.x + (dx / d) * rp) - out.x) * h.st;
     out.y += ((h.y + (dy / d) * rp) - out.y) * h.st;
-    const nah = (1 - u) * h.st;
-    out.f *= 1 - 0.62 * nah * nah;         // zum Ring hin radial kleiner
-    const s = 1 + h.bogen * nah * nah;     // tangential zu Bögen gestreckt
-    if (s > out.str) {
-      out.str = s;
-      out.rot = Math.atan2(dy, dx) + Math.PI / 2; // Tangenten-Richtung
-      out.blend = Math.min(1, (s - 1) * 1.5);     // weiche Rotations-Blende
-    }
+    out.f *= 1 - 0.3 * (1 - u) * h.st; // sanft kleiner Richtung Loch
   }
   return out;
 }
@@ -95,8 +88,8 @@ const PJ_B = { x: 0, y: 0, k: 1, dim: 1, hidden: false };
 // Schwarz) — dim = 1 obenauf, dim = 0 unten = unsichtbar vor dem Grund
 const FOG = hexToRgb01('#31353a');
 
-const LW_A = { x: 0, y: 0, f: 1, str: 1, rot: 0, blend: 0, hidden: false };
-const LW_B = { x: 0, y: 0, f: 1, str: 1, rot: 0, blend: 0, hidden: false };
+const LW_A = { x: 0, y: 0, f: 1, hidden: false };
+const LW_B = { x: 0, y: 0, f: 1, hidden: false };
 
 // Aktive, sichtbare Agenten in arr packen (Kamera-Culling inklusive).
 // → Anzahl geschriebener Instanzen.
@@ -152,12 +145,6 @@ export function packInstances(store, kamera, arr) {
         px = LW_A.x;
         py = LW_A.y;
         sz *= LW_A.f;
-        if (LW_A.blend > 0.001) {
-          let da = LW_A.rot - rotV;
-          da = Math.atan2(Math.sin(da), Math.cos(da));
-          rotV += da * LW_A.blend;
-          aspect *= 1 + (LW_A.str - 1) * LW_A.blend;
-        }
       }
       project3d(P, kamera, px, py, z, PJ_A);
       if (PJ_A.hidden) continue;

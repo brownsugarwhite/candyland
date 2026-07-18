@@ -39,15 +39,25 @@ void main() {
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
-// WURMLOCH-FAHRT (Post-Process): Sichtrolle um Z + ruhige radiale
-// Aberration. Die Raumkrümmung des Wurmlochs selbst ist ECHTES 3D im
-// Gitter (renderformat.project3d) — hier gibt es keine Linse mehr.
+// ECHTE GRAVITATIONSLINSE (Post-Process, Referenz 10): Punktmassen-
+// Linsengleichung β = θ − θE²/θ — jeder PIXEL außerhalb des Einstein-
+// Radius wird zur Quelle β hin umgelenkt, dadurch krümmen sich die
+// Kacheln zu echten Bögen um den Ring. Die Quellfläche innerhalb
+// schluck·θE ist leer (renderformat.lochWarp) und β wird nie kleiner
+// als 0.8·θE gesampelt — deshalb liegt direkt außerhalb des Rings der
+// leere Gap, es gibt keine Zweitbilder und KEINE Bandtönung (es wird
+// ausschließlich die echte Szene gesampelt, nie ein synthetischer
+// Hintergrund). Innerhalb θE: unverzerrt (Label bleibt lesbar). Dazu
+// leichte chromatische Aberration, feine Ringlinie und die ruhige
+// radiale Aberration des Durchflugs.
 const FS_POST = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 uniform sampler2D u_scene;
 uniform vec2 u_view;
-uniform vec4 u_fx;       // rotWinkel, tcx, tcy, smear
+uniform vec4 u_holes[4]; // sx, sy, thetaE(px), aktiv
+uniform vec4 u_fx;       // –, tcx, tcy, smear
+uniform vec4 u_par;      // linsenReich(·θE), ringAlpha, chrom, –
 out vec4 outColor;
 
 // Screen-Koordinaten laufen oben-links los; GL-Texturen unten-links —
@@ -61,16 +71,36 @@ void main() {
   // sichtbarer Bereich des Fullscreen-Dreiecks: v_uv ∈ 0..1
   vec2 px = vec2(v_uv.x, 1.0 - v_uv.y) * u_view;
 
-  // Durchflug: die ganze Sicht ROLLT um die Bildmitte (0 → 180°)
-  float rot = u_fx.x;
-  if (abs(rot) > 0.0005) {
-    vec2 c = u_fx.yz;
-    vec2 rel = px - c;
-    float cs = cos(rot), sn = sin(rot);
-    px = c + vec2(rel.x * cs - rel.y * sn, rel.x * sn + rel.y * cs);
+  vec2 pR = px;
+  vec2 pG = px;
+  vec2 pB = px;
+  float ring = 0.0;
+  for (int i = 0; i < 4; i++) {
+    vec4 h = u_holes[i];
+    if (h.w < 0.5) continue;
+    vec2 rel = px - h.xy;
+    float d = max(length(rel), 1e-3);
+    float tE = h.z;
+    float reich = tE * u_par.x;
+    if (d > tE && d < reich) {
+      vec2 dir = rel / d;
+      float c = u_par.z;
+      float bG = d - (tE * tE) / d;
+      float bR = d - (tE * tE * (1.0 + c)) / d;
+      float bB = d - (tE * tE * (1.0 - c)) / d;
+      float lo = tE * 0.8; // Quelle nie aus dem Label-Zentrum
+      bG = max(bG, lo); bR = max(bR, lo); bB = max(bB, lo);
+      // am Außenrand weich in die unverzerrte Szene zurückblenden
+      float fade = smoothstep(reich * 0.55, reich, d);
+      pR = h.xy + dir * mix(bR, d, fade);
+      pG = h.xy + dir * mix(bG, d, fade);
+      pB = h.xy + dir * mix(bB, d, fade);
+    }
+    float rd = abs(d - tE);
+    ring += u_par.y * exp(-rd * rd / 2.5); // feine Linie, kein Halo
   }
-
-  vec3 col = szene(px);
+  vec3 col = vec3(szene(pR).r, szene(pG).g, szene(pB).b);
+  col += vec3(0.85, 0.97, 0.93) * ring;
 
   // ruhige radiale Aberration während des Durchflugs (kein Geflacker)
   float sm = u_fx.w;
@@ -234,7 +264,11 @@ export function createRendererGL(canvas, view) {
   gl.useProgram(progPost);
   gl.uniform1i(gl.getUniformLocation(progPost, 'u_scene'), 1);
   gl.uniform2f(gl.getUniformLocation(progPost, 'u_view'), view.w, view.h);
+  gl.uniform4f(gl.getUniformLocation(progPost, 'u_par'),
+    CONFIG.tunnel.linse, CONFIG.tunnel.ringAlpha, 0.028, 0);
   const uFx = gl.getUniformLocation(progPost, 'u_fx');
+  const uHoles = gl.getUniformLocation(progPost, 'u_holes');
+  const holeArr = new Float32Array(16);
   const vaoPost = gl.createVertexArray();
 
   const formen = formenInfo();
@@ -350,12 +384,21 @@ export function createRendererGL(canvas, view) {
       gl.drawArrays(gl.LINES, ln.nMesh, ln.nTotal - ln.nMesh);
     }
 
-    // Post-Process: Wurmloch-Fahrt (Rolle + Aberration) auf den Screen
+    // Post-Process: echte Gravitationslinse + Durchflug-Aberration
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, view.w * dpr, view.h * dpr);
-    const L = store.linse || { rot: 0, tcx: 0, tcy: 0, smear: 0 };
+    const L = store.linse || { holes: [], tcx: 0, tcy: 0, smear: 0 };
+    holeArr.fill(0);
+    const nH = Math.min(4, L.holes ? L.holes.length : 0);
+    for (let i = 0; i < nH; i++) {
+      holeArr[i * 4] = L.holes[i].sx;
+      holeArr[i * 4 + 1] = L.holes[i].sy;
+      holeArr[i * 4 + 2] = L.holes[i].thetaE;
+      holeArr[i * 4 + 3] = 1;
+    }
     gl.useProgram(progPost);
-    gl.uniform4f(uFx, L.rot || 0, L.tcx, L.tcy, L.smear || 0);
+    gl.uniform4fv(uHoles, holeArr);
+    gl.uniform4f(uFx, 0, L.tcx, L.tcy, L.smear || 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, sceneTex);
     gl.bindVertexArray(vaoPost);

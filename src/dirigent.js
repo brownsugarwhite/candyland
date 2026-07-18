@@ -530,20 +530,19 @@ export function createDirigent(store, kamera) {
     }[ansicht]);
   }
   let suppressClick = 0;
-  const RP = { x: 0, y: 0, k: 1, dim: 1, hidden: false };
 
   function formHoleLabel(hole) {
     const T = CONFIG.tunnel;
     const res = formText(hole.name, {
-      x: hole.x, y: hole.y + hole.r * 0.30, h: T.labelH,
+      x: hole.x, y: hole.y + hole.r * 0.18, h: T.labelH,
       align: 'center', color: [235, 244, 239],
     });
     hole.labelIds = res.ids;
-    const tri = allocReserve(store, hole.x, hole.y + hole.r - 0.21);
+    const tri = allocReserve(store, hole.x, hole.y + hole.r * 0.58);
     if (tri >= 0) {
       wakeAgent(store, tri, tNow, 0.2, {
         size: 0.02, shape: 2, swirl: false, // analytisches Dreieck
-        px: hole.x, py: hole.y + hole.r - 0.21,
+        px: hole.x, py: hole.y + hole.r * 0.58,
       });
       store.state[tri] = STATE.TEXT;
       store.sizeTgt[tri] = 0.4;
@@ -677,25 +676,8 @@ export function createDirigent(store, kamera) {
     }
   }
 
-  // der Schlund-Ring: eine feine Linie am Mund des Tubus (z = 0),
-  // durch DIESELBE 3D-Kamera projiziert wie alles andere
-  function ringLines(h) {
-    const P = store.p3d;
-    const a = CONFIG.tunnel.ringAlpha;
-    const N = 48;
-    let px = 0, py = 0, hat = false;
-    for (let k = 0; k <= N; k++) {
-      const w = (k / N) * Math.PI * 2;
-      project3d(P, kamera, h.x + Math.cos(w) * h.r, h.y + Math.sin(w) * h.r, 0, RP);
-      if (RP.hidden) { hat = false; continue; }
-      if (hat) store.extraLines.push(px, py, RP.x, RP.y, 0.92, 0.96, 0.94, a);
-      px = RP.x; py = RP.y; hat = true;
-    }
-  }
-
-  // Fahrt-FX (Sichtrolle + Aberration) und die echte 3D-Kamera (store.p3d).
-  // store.linse.holes bleibt LEER — Raumkrümmung ist Geometrie, kein
-  // Screen-Space-Effekt.
+  // Echte Gravitationslinse (Post-Shader, store.linse.holes in Screen-px)
+  // + Welt-Warp (leere Quellfläche, store.p3d.holes) + Fahrt-Aberration.
   function linseUpdate(t, dt) {
     const L = store.linse;
     L.holes.length = 0;
@@ -709,20 +691,23 @@ export function createDirigent(store, kamera) {
     const P = store.p3d;
     P.holes.length = 0;
     const sichtbar = activeApp ? [] : (reise ? [reise.hole] : dimHoles[dim]);
-    // der Sog des Flugs verstärkt Krümmung und Reichweite — die
-    // umliegenden Agenten werden langgezogen und ins Loch gezogen,
-    // bleiben aber IMMER am äußeren Rand (Schwarzes-Loch-Prinzip)
+    // der Sog des Flugs verstärkt den Zug — die umliegenden Agenten
+    // werden von der Linse langgezogen und bleiben immer am Rand
     const glatt = (x) => x * x * (3 - 2 * x);
     for (const h of sichtbar) {
       // jedes Loch wächst weich ein — nie snappend
       const st = glatt(Math.min(1, (t - (h.born || 0)) / T.wuchsSec));
       if (st <= 0.001) continue;
       P.holes.push({
-        x: h.x, y: h.y, r: h.r, st,
-        gapR: h.r + T.gap,
-        reich: h.r + T.gap + T.reich * (1 + reiseSaug * T.saug),
-        kruemm: T.kruemm * (1 + reiseSaug * T.saug),
-        bogen: T.bogen * (1 + reiseSaug * T.saug),
+        x: h.x, y: h.y, st,
+        schluck: h.r * T.schluck,
+        reich: h.r * T.schluck + T.zug * (1 + reiseSaug * T.saug),
+        kruemm: T.kruemm,
+      });
+      const sp = kamera.worldToScreen(h.x, h.y);
+      L.holes.push({
+        sx: sp.x, sy: sp.y,
+        thetaE: h.r * kamera.scale * st * (1 + reiseSaug * T.saug * 0.4),
       });
     }
     // Reise: echte 3D-Drehung der Welt um die vertikale Wurmloch-Achse
@@ -744,7 +729,6 @@ export function createDirigent(store, kamera) {
     P.dimm = CONFIG.p3d.dimm;
     P.aktiv = P.holes.length > 0 || tiltCur !== 0 || reiseYaw !== 0 ||
       rex3d.isOpen;
-    for (const h of sichtbar) ringLines(h);
   }
 
   // ---- Apps (der Schwarm morpht zum Screen) ------------------------------
@@ -970,8 +954,8 @@ export function createDirigent(store, kamera) {
       return rects.length > 0 ? rects : null;
     },
     get anchors() {
-      const a = logo.anchor();
-      return a ? [a] : null;
+      const list = [logo.anchor(), rex3d.anchor()].filter(Boolean);
+      return list.length > 0 ? list : null;
     },
     get veil() {
       if (karte.rect) return karte.rect;

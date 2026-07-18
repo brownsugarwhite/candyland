@@ -29,21 +29,21 @@ Diese Regeln sind verbindlich für alles, was in diesem Projekt entsteht.
 
 - **Rex verwaltet den Schwarm** und ist immer über das Claws-Icon oben rechts
   erreichbar (2 Kratzer = 2 Agenten, `assets/svg/claws.svg`).
-- **Klick auf die Claws:** Rex drückt sich als lebendiges 3D-Käfig-
-  Drahtgitter mit Kopf und Armen von hinten durch den Schwarm
-  (`src/rex3d.js`, Modell `assets/obj/rex.obj`; die mitmodellierte
-  Hintergrundplatte liegt auf der Schwarmebene und dient Orientierung
-  + weichem Übergang). Zwei Catmull-Clark-Schritte glätten den groben
-  Käfig; gezeichnet werden NUR die Ur-Käfigkanten als weiche,
-  durchgezogene 4-Segment-Kurven (wie ein nicht angewandter
-  Subsurface-Modifier), weiß und ~2px dick — Dicke wächst
-  perspektivisch zur Kamera. Die Gitteragenten UNTER Rex verdichten/
-  lockern sich auf die Eckpunktzahl des Käfigs (kreisrund, weiß, mit
-  dem Draht verschmolzen), fehlende Knoten kommen aus der Reserve; das
-  Schachbrett drumherum bleibt. Rex ist SCREEN-fest (zoomt nicht mit),
-  der Kopf (nicht die Platte!) schaut dem Cursor nach. Esc oder
-  Claws-Klick schickt ihn zurück — die Knoten lockern sich in den
-  Schwarm.
+- **Klick auf die Claws** (Referenz `12_rex_demo_final`): Rex drückt
+  sich als zartes, lebendiges Käfig-Drahtgitter mit Kopf und Armen von
+  hinten durch den Schwarm (`src/rex3d.js`, Modell
+  `assets/obj/rex.obj`; die mitmodellierte Hintergrundplatte liegt auf
+  der Schwarmebene — Orientierung + weicher Übergang). Zwei
+  Catmull-Clark-Schritte; gezeichnet werden NUR die Ur-Käfigkanten als
+  weiche, durchgezogene 4-Segment-Kurven (~1.3px, Dicke wächst
+  perspektivisch; Platte dunkler, Körper heller). Er sitzt rechts
+  unter der Bildmitte, ist SCREEN-fest (~270px, zoomt nicht mit) und
+  atmet subtil. Die Gitteragenten unter ihm verdichten/lockern sich
+  auf die Käfig-Eckpunkte und BLEIBEN kleine Squircle-Kacheln
+  (Platten-Knoten sichtbar, Körper-Knoten fast unsichtbar); fehlende
+  Knoten aus der Reserve; das umliegende Gitter weicht per Anker-Warp
+  sanft aus. Der Kopf (nicht die Platte!) schaut dem Cursor nach. Esc
+  oder Claws-Klick schickt ihn zurück.
 - Rex' Intelligenz ist die Claude-API (`src/brain.js`, Key via „key"-Befehl,
   localStorage). Einzelne Agenten haben lokale, simulierte Autonomie und eine
   Identität (deterministischer Name aus der Agenten-Id, z. B. „Agent Vega 4000").
@@ -104,18 +104,22 @@ Logo tritt beiseite, oben rechts sitzt der pinke Schließen-Agent
   (mockProvider sofort; fireflyProvider braucht Token-Proxy — Secret
   gehört nie in den Browser).
 - `tunnel`/`ordner` (Referenz `10_ordner_shader_wurmloch`,
-  src/dirigent.js): Schwarzes Loch — Welt-Warp um jedes Loch
-  (renderformat.lochWarp), überall exakt gleich, unabhängig von der
-  Kameraposition. Die umliegenden Kacheln rutschen auf den Ring zu,
-  krümmen sich tangential zu Bögen und bleiben IMMER außerhalb des
-  leeren Gap-Rings; das Innere ist IMMER komplett leer. Alles blendet
-  weich ein (h.st), nichts snappt. Drag verschiebt das Loch. Klick =
-  die REISE: die Kamera fliegt smooth hinein (der leere Schlund wächst
-  über den Schirm, die langgezogenen Agenten bleiben am äußeren Rand),
-  im Inneren dreht die WELT echt 180° um die vertikale Wurmloch-Achse
-  (project3d.yaw, kein Screen-Effekt), Ankunft auf der gegenüber-
-  liegenden Seite: die Agenten morphen aus dem Lochrand zurück, der
-  Schwarm justiert sich mit einer schnellen Welle (welleKick).
+  src/dirigent.js): Schwarzes Loch mit ECHTER Gravitationslinse.
+  Zwei Schichten: (1) renderformat.lochWarp (Weltebene) hält die
+  Quellfläche innerhalb schluck·θE immer komplett leer und verdichtet
+  die Umgebung sanft; (2) der Post-Shader wendet die Punktmassen-
+  Linsengleichung β = θ − θE²/θ PRO PIXEL an — die Kacheln krümmen
+  sich zu echten Bögen um den Ring, mit leichter chromatischer
+  Aberration und feiner Mint-Ringlinie. β wird nie < 0.8·θE gesampelt
+  (leerer Gap, keine Zweitbilder) und es wird ausschließlich die echte
+  Szene gesampelt — Bandtönung ist unmöglich. Label/Marker leben im
+  unverzerrten Inneren (< 0.8·θE). Alles blendet weich ein (h.st).
+  Drag verschiebt das Loch. Klick = die REISE: die Kamera fliegt
+  smooth hinein (θE wächst über den Schirm, die Linse zieht die
+  Agenten lang, sie bleiben immer am Rand), im Inneren dreht die WELT
+  echt 180° um die vertikale Wurmloch-Achse (project3d.yaw), Ankunft
+  auf der Gegenseite: die Agenten morphen aus dem Lochrand zurück,
+  der Schwarm justiert sich mit einer schnellen Welle (welleKick).
 
 ## Technik
 
