@@ -99,8 +99,8 @@ export function attachInput(canvas, dirigent, kamera, actions) {
     dirigent.onClick(p.x, p.y);
   };
 
-  // Rad/Trackpad: Pinch (ctrl) und klassisches Mausrad zoomen, die
-  // 2-Finger-Geste des Trackpads (feine/diagonale Deltas) verschiebt
+  // Mausrad/Pinch ZOOMEN (wie gehabt); nur klar horizontale 2-Finger-
+  // Bewegung verschiebt. Pan primär: 2-Finger-Touch + mittlere Maustaste.
   const onWheel = (e) => {
     e.preventDefault();
     if (dirigent.onWheel(e.deltaY)) return;
@@ -108,13 +108,12 @@ export function attachInput(canvas, dirigent, kamera, actions) {
     if (dirigent.zoomLocked) return;
     const K = CONFIG.kamera;
     const p = toScreen(e);
-    const mausRad = e.deltaX === 0 && Math.abs(e.deltaY) >= 50 && Number.isInteger(e.deltaY);
-    if (e.ctrlKey || mausRad) {
-      const f = Math.exp(-e.deltaY * (e.ctrlKey ? K.pinchFactor : K.wheelFactor));
-      kamera.zoomAt(p.x, p.y, f);
-    } else {
+    if (!e.ctrlKey && Math.abs(e.deltaX) > Math.abs(e.deltaY) * 1.2) {
       kamera.pan(e.deltaX / kamera.scale, e.deltaY / kamera.scale);
+      return;
     }
+    const f = Math.exp(-e.deltaY * (e.ctrlKey ? K.pinchFactor : K.wheelFactor));
+    kamera.zoomAt(p.x, p.y, f);
   };
 
   const onKeyDown = (e) => {

@@ -15,7 +15,7 @@ export const CONFIG = {
 
   gitter: {
     zellePx: 50,          // Ziel-Zellgröße beim Landing (Referenz: 800/16)
-    agentSize: 0.78,      // Kachelgröße in Zellen (Referenz: 39/50)
+    agentSize: 1.0,       // Kachelgröße = Abstand (Kachel füllt die Zelle)
     litParity: 0,         // wach ist die Schachbrett-Hälfte (col+row)%2 === litParity
     latFaktor: 4,         // Gesamtgitter = latFaktor × Landing-Fenster
   },
