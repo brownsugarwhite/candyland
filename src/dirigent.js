@@ -590,7 +590,7 @@ export function createDirigent(store, kamera) {
     if (reise) return;
     clearHoleLabel(hole);
     reise = {
-      phase: 'anflug', t0: tNow, hole, switched: false,
+      phase: 'flug', t0: tNow, hole, switched: false, note: '',
       scale0: kamera.scale, cx0: kamera.cx, cy0: kamera.cy,
     };
   }
@@ -607,8 +607,8 @@ export function createDirigent(store, kamera) {
     }
     store.baseTint = [...T.dims[dim].tint];
     CONFIG.wellen.omega = T.dims[dim].omega;
-    // Ankunft als WASSERWELLE: jeder Agent erwacht an seinem Platz, wenn
-    // ihn der Ring vom Loch aus erreicht — wie ein Stein im Wasser
+    // Ankunft als WASSERWELLE vom Loch aus — die neue Welt entsteht,
+    // während die Kamera noch aus dem Tunnel herausfliegt
     for (const i of store.carrierList) {
       if (store.state[i] > STATE.RETURNING) continue;
       const dx = store.homeX[i] - hole.x, dy = store.homeY[i] - hole.y;
@@ -621,17 +621,16 @@ export function createDirigent(store, kamera) {
       store.size[i] = 0.02;
       store.state[i] = STATE.RETURNING;
       store.frozen[i] = 0;
-      store.activateAt[i] = tNow + 0.15 + d / T.welleSpeed;
+      store.activateAt[i] = tNow + 0.2 + d / T.welleSpeed;
       store.tgtR[i] = store.baseTint[0];
       store.tgtG[i] = store.baseTint[1];
       store.tgtB[i] = store.baseTint[2];
       store.brightness[i] = 0;
     }
     store.needsRebuild = true;
-    // Kamera zentriert überm Ausgangs-Loch der neuen Dimension
-    kamera.setView(hole.x, hole.y, reise.scale0);
-    kamera.snapClamped(reise.scale0);
-    showNote(dim === 1 ? 'neue dimension — der tunnel führt zurück' : 'wieder zuhause');
+    reise.note = dim === 1
+      ? 'neue dimension — der tunnel führt zurück'
+      : 'wieder zuhause';
   }
 
   function reiseUpdate(t) {
@@ -639,75 +638,49 @@ export function createDirigent(store, kamera) {
     const T = CONFIG.tunnel;
     const H = reise.hole;
     const glatt = (p) => p * p * (3 - 2 * p);
-    if (reise.phase === 'anflug') {
-      // Anflug: ein RUHIGER Kameraflug aufs Loch, die Krümmung zieht an
-      const p = Math.min(1, (t - reise.t0) / T.anflugSec);
-      const e = glatt(p);
+    if (reise.phase === 'flug') {
+      // EIN kontinuierlicher 3D-Flug, ohne Schnitte: die Kamera fliegt
+      // ins Loch (der Ring wächst dadurch von selbst über den Schirm),
+      // rollt dabei um Z auf 180°, und fliegt aus dem Austritts-Tunnel
+      // der anderen Dimension wieder heraus. Der Dimensionswechsel
+      // passiert exakt in der Mitte — unsichtbar, weil die Mündung dann
+      // den ganzen Schirm umschließt.
+      const p = Math.min(1, (t - reise.t0) / T.flugSec);
+      // Ziel-Zoom: Ring sicher außerhalb der Bilddiagonale
+      const halfDiag = Math.hypot(kamera.viewW, kamera.viewH) / 2;
+      const zoomMax = (halfDiag * 1.45) / H.r;
+      // symmetrische Log-Zoom-Kurve: rein … Scheitel … wieder raus
+      const dreieck = 1 - Math.abs(1 - 2 * p);
+      const k = glatt(Math.min(1, dreieck * 1.15));
+      const scale = reise.scale0 * Math.pow(zoomMax / reise.scale0, k);
+      const anflug = glatt(Math.min(1, p * 2.2));
       kamera.setView(
-        reise.cx0 + (H.x - reise.cx0) * e,
-        reise.cy0 + (H.y - reise.cy0) * e,
-        reise.scale0 * (1 + 0.65 * e * e),
+        reise.cx0 + (H.x - reise.cx0) * anflug,
+        reise.cy0 + (H.y - reise.cy0) * anflug,
+        scale,
       );
-      lenseBoost = 1 + (T.anflugLense - 1) * e;
-      if (p >= 1) {
-        reise.phase = 'durch';
-        reise.t0 = t;
-        reise.scaleIn = kamera.scale;
-      }
-    } else if (reise.phase === 'durch') {
-      // DURCHFLUG: der Schwarm ist als Wurmloch nach innen gestülpt —
-      // die Linse wächst, bis ihre Mündung den ganzen Schirm füllt
-      // (innen sind keine Agenten), die Sicht rollt dabei um 180°.
-      const p = Math.min(1, (t - reise.t0) / T.durchSec);
-      const e = glatt(p);
-      reiseRot = Math.PI * e;
-      reiseSmear = Math.sin(Math.PI * p) * 0.9;
-      // θE wächst vom Loch-Radius bis über die halbe Bilddiagonale
-      const voll = Math.hypot(kamera.viewW, kamera.viewH) * 0.62;
-      const start = H.r * reise.scaleIn * T.anflugLense;
-      reise.thetaOverride = start + (voll - start) * e;
-      kamera.setView(H.x, H.y, reise.scaleIn * (1 + 0.35 * e));
-      if (!reise.switched && p >= 0.92) {
-        // hinter der gefüllten Mündung wechselt still die Dimension
+      // Z-Rolle: kontinuierlich 0 → 180° über den ganzen Flug
+      reiseRot = Math.PI * glatt(p);
+      reiseSmear = Math.sin(Math.PI * p) * 0.55;
+      if (!reise.switched && p >= 0.5) {
         reise.switched = true;
         dimensionsWechsel(H);
       }
       if (p >= 1) {
-        reise.phase = 'oeffnen';
-        reise.t0 = t;
-      }
-    } else if (reise.phase === 'oeffnen') {
-      // ANDERE SEITE: das Wurmloch öffnet sich — die Mündung zieht sich
-      // auf den Rückweg-Tunnel zusammen, die Rolle vollendet 360°,
-      // man blickt auf den noch gekrümmten Raum, der sich entspannt
-      const p = Math.min(1, (t - reise.t0) / T.oeffnenSec);
-      const e = glatt(p);
-      reiseRot = Math.PI * (1 + e);
-      reiseSmear = (1 - e) * 0.5;
-      // Kamera gleitet auf die Normalansicht zurück, die Mündung zieht
-      // sich auf den Rückweg-Tunnel zusammen
-      const scaleDurch = reise.scaleIn * 1.35;
-      kamera.setView(H.x, H.y, scaleDurch + (reise.scale0 - scaleDurch) * e);
-      const voll = Math.hypot(kamera.viewW, kamera.viewH) * 0.62;
-      const ziel = H.r * reise.scale0;
-      reise.thetaOverride = voll + (ziel - voll) * e;
-      lenseBoost = 1;
-      if (p >= 1) {
-        kamera.snapClamped(reise.scale0);
+        // 180° im Schachbrett = deckungsgleich → Rolle unsichtbar lösen
         reiseRot = 0;
         reiseSmear = 0;
-        reise.thetaOverride = 0;
+        kamera.snapClamped(reise.scale0);
         reise.phase = 'welle';
         reise.t0 = t;
       }
     } else if (t > reise.t0 + T.welleSec) {
       lenseBoost = 1;
+      if (reise.note) showNote(reise.note);
       reise = null;
       for (const h of dimHoles[dim]) {
         if (!h.labelIds) formHoleLabel(h);
       }
-    } else {
-      lenseBoost = Math.max(1, lenseBoost - (t - reise.t0) * 0.5);
     }
   }
 
@@ -718,10 +691,7 @@ export function createDirigent(store, kamera) {
     const sichtbar = activeApp ? [] : (reise ? [reise.hole] : dimHoles[dim]);
     for (const h of sichtbar) {
       const sp = kamera.worldToScreen(h.x, h.y);
-      const theta = reise && reise.thetaOverride
-        ? reise.thetaOverride
-        : h.r * kamera.scale * lenseBoost;
-      L.holes.push({ sx: sp.x, sy: sp.y, thetaE: theta });
+      L.holes.push({ sx: sp.x, sy: sp.y, thetaE: h.r * kamera.scale * lenseBoost });
     }
     L.rot = reiseRot;
     L.smear = reiseSmear;
@@ -864,7 +834,7 @@ export function createDirigent(store, kamera) {
     }
 
     if (!booted && t > CONFIG.boot.staggerSec + 0.9) booted = true;
-    if (booted) logo.update(t);
+    if (booted) logo.update(t, !!reise);
 
     auswahl.update(dt, cursor, !feld.isOpen && !activeApp);
     // der dem Cursor nächste GITTER-Agent wird angezogen statt abgestoßen

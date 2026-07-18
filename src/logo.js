@@ -111,12 +111,13 @@ export function createLogo(store, registerTask, kamera) {
     store.needsRebuild = true;
   }
 
-  // pro Frame NACH postStep: exakt pinnen (kein Feder-Nachlauf)
-  function update(tNow) {
+  // pro Frame NACH postStep: exakt pinnen (kein Feder-Nachlauf).
+  // hidden (Wurmloch-Flug): die Claws tauchen kurz weg
+  function update(tNow, hidden = false) {
     ensureClaws(tNow);
     const p = clawScreen();
     const w = kamera.screenToWorld(p.sx, p.sy);
-    const size = (p.cell * C.cellFrac) / kamera.scale;
+    const size = hidden ? 0 : (p.cell * C.cellFrac) / kamera.scale;
     for (const id of [claws.k1, claws.k2]) {
       if (id < 0 || store.active[id] === 0) continue;
       store.posX[id] = w.x;
@@ -128,7 +129,7 @@ export function createLogo(store, registerTask, kamera) {
       store.targetX[id] = w.x;
       store.targetY[id] = w.y;
       store.sizeTgt[id] = size;
-      store.size[id] = size; // fixed: auch die Größe folgt sofort
+      if (!hidden) store.size[id] = size; // fixed: Größe folgt sofort
       store.tgtR[id] = store.baseTint[0] * C.bri;
       store.tgtG[id] = store.baseTint[1] * C.bri;
       store.tgtB[id] = store.baseTint[2] * C.bri;

@@ -323,6 +323,15 @@ export function postStep(store, tSim, dtFrame, env) {
 
     // Veil-Faktor für Trägeragenten unter Inhalten
     let veilF = 1;
+    if (env.holes && isCarrier && st <= STATE.RETURNING) {
+      // im Lochinneren gibt es KEINE sichtbaren Schwarmagenten
+      for (const hole of env.holes) {
+        const dxh = posX[i] - hole.x, dyh = posY[i] - hole.y;
+        const dh = Math.sqrt(dxh * dxh + dyh * dyh);
+        const Rh = (hole.r || CONFIG.tunnel.r) + 0.15;
+        if (dh < Rh) veilF *= Math.max(0, (dh - Rh * 0.75) / (Rh * 0.25));
+      }
+    }
     if (veil !== null && isCarrier && st <= STATE.RETURNING) {
       const hx = homeX[i], hy = homeY[i];
       const dx = hx < veil.x0 ? veil.x0 - hx : hx > veil.x1 ? hx - veil.x1 : 0;
@@ -352,11 +361,12 @@ export function postStep(store, tSim, dtFrame, env) {
           const d = Math.sqrt(dx * dx + dy * dy) || 1e-3;
           const R = hole.r || CONFIG.tunnel.r;
           if (d < R) {
-            // innen leer: Agenten stauen sich knapp außerhalb des Rings —
-            // dort verbiegt sie die Gravitationslinse zu Bögen
+            // INNEN LEER: Agenten stauen sich deutlich außerhalb des
+            // Rings (dort werden sie zu Linsen-Bögen); wer noch drin
+            // ist, blendet vollständig aus
             const f = d / R;
-            tx = hole.x + (dx / d) * (R + 0.12 + f * 0.4);
-            ty = hole.y + (dy / d) * (R + 0.12 + f * 0.4);
+            tx = hole.x + (dx / d) * (R + 0.55 + f * 0.45);
+            ty = hole.y + (dy / d) * (R + 0.55 + f * 0.45);
             shrink *= 0.35 + 0.45 * f;
           } else if (d < R + 2.4) {
             const g = 1 - (d - R) / 2.4;

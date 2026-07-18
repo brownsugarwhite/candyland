@@ -341,7 +341,14 @@ toggles.high.addEventListener('click', () => mode !== 'high' && setMode('high'))
     }
     const pre = document.createElement('pre');
     pre.id = 'dump';
-    pre.textContent = JSON.stringify({ selftest: world.selftest(), logoRow: rows, cells }, null, 1);
+    pre.textContent = JSON.stringify({
+      selftest: world.selftest(),
+      linse: world.store.linse,
+      kamera: { cx: world.kamera.cx, cy: world.kamera.cy, scale: world.kamera.scale },
+      dim: world.dirigent.dim,
+      logoRow: rows,
+      cells,
+    }, null, 1);
     document.body.appendChild(pre);
   }
 })();

@@ -102,7 +102,7 @@ void main() {
     float tE = h.z;
     if (d < tE) {
       // Ereignishorizont: innen ruhig und dunkel (Label bleibt lesbar)
-      veil *= mix(0.12, 1.0, pow(clamp(d / tE, 0.0, 1.0), 0.9));
+      veil *= 0.9; // innen kaum abdunkeln — flach, ohne Verlauf
     } else if (d < tE * u_par.y) {
       float fall = 1.0 - smoothstep(tE * (u_par.y * 0.7), tE * u_par.y, d);
       vec2 dir = rel / d;
@@ -117,7 +117,7 @@ void main() {
       bgMix = max(bgMix, 1.0 - smoothstep(tE * 0.92, tE * 1.01, dG));
     }
     float rd = abs(d - tE);
-    ring += u_par.z * (exp(-rd * rd / 3.0) + 0.12 * exp(-rd * rd / 160.0));
+    ring += u_par.z * exp(-rd * rd / 3.0); // feine Linie, kein Halo
   }
   vec3 col = vec3(szene(pR).r, szene(pG).g, szene(pB).b) * veil;
   col = mix(col, hintergrund(px), bgMix);

@@ -158,7 +158,7 @@ fn hintergrund(px: vec2f) -> vec3f {
     let d = max(length(rel), 1e-3);
     let tE = h.z;
     if (d < tE) {
-      veil *= mix(0.12, 1.0, pow(clamp(d / tE, 0.0, 1.0), 0.9));
+      veil *= 0.9; // innen kaum abdunkeln — flach, ohne Verlauf
     } else if (d < tE * linse.par.y) {
       let fall = 1.0 - smoothstep(tE * (linse.par.y * 0.7), tE * linse.par.y, d);
       let dir = rel / d;
@@ -173,7 +173,7 @@ fn hintergrund(px: vec2f) -> vec3f {
       bgMix = max(bgMix, 1.0 - smoothstep(tE * 0.92, tE * 1.01, dG));
     }
     let rd = abs(d - tE);
-    ring += linse.par.z * (exp(-rd * rd / 3.0) + 0.12 * exp(-rd * rd / 160.0));
+    ring += linse.par.z * exp(-rd * rd / 3.0); // feine Linie, kein Halo
   }
   var col = vec3f(szene(pR).r, szene(pG).g, szene(pB).b) * veil;
   col = mix(col, hintergrund(px), bgMix);

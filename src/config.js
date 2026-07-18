@@ -196,11 +196,8 @@ export const CONFIG = {
     ringGlow: 0.55,       // Leuchtkraft des Rings
     labelH: 0.34,         // Namens-Label (Zellen)
     dragMin: 10,          // px — mehr Bewegung = Verschieben statt Reise
-    anflugSec: 0.85,      // Kamera nähert sich, die Krümmung zieht an
-    anflugLense: 2.6,     // Linsen-Verstärkung am Ende des Anflugs
-    durchSec: 1.15,       // Durchflug: Sicht rollt 180°, Linse füllt den Schirm
-    oeffnenSec: 0.9,      // andere Seite: Wurmloch öffnet sich (Linse klingt ab)
-    welleSec: 1.6,        // Aufbau der neuen Dimension als Wasser-Ringwelle
+    flugSec: 2.6,         // EIN kontinuierlicher Flug: rein → 180°-Z-Rolle
+    welleSec: 1.2,        //   → raus; die neue Welt entsteht als Ringwelle
     welleSpeed: 11,       // Zellen/s
     dims: [
       { tint: [213, 218, 215], omega: 0.55 },
