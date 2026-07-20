@@ -299,9 +299,9 @@ toggles.high.addEventListener('click', () => mode !== 'high' && setMode('high'))
         world.advance(0.7);
       } else if (cmd === 'warte') {
         world.advance(nums[0] || 1);
-      } else if (cmd === 'zieh') {
+      } else if (cmd === 'zieh') { // 5. Zahl = 1 → mit ctrl (Verdichtung)
         world.dirigent.onPointerMove(nums[0], nums[1]);
-        world.dirigent.onPointerDown(nums[0], nums[1]);
+        world.dirigent.onPointerDown(nums[0], nums[1], nums[4] === 1);
         for (let k = 1; k <= 16; k++) {
           const x = nums[0] + ((nums[2] - nums[0]) * k) / 16;
           const y = nums[1] + ((nums[3] - nums[1]) * k) / 16;

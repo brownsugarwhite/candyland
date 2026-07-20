@@ -420,10 +420,13 @@ export function createRex3d(store, deps) {
     if (!offen || !geo || knotIds.length === 0) return;
     const P = store.p3d;
     const t = tNow - t0;
-    // Phasen: (1) Agenten skalieren, (2) Linien verdicken sich im
-    // Kopfbereich, (3) gerade → gekrümmt + Durchpressen — alles weich
-    const dickeF = glatt((t - 0.2) / 0.9);
-    const e = glatt((t - 0.7) / 1.5);
+    // REIHENFOLGE (User-Vorgabe): (1) die Schwarmagenten verdichten
+    // sich an der Rex-Stelle auf die Knotenzahl, skalieren parallel,
+    // und das Rautengitter dort wird WEISS — (2) erst DANN morpht aus
+    // dieser Position der Rex (Krümmung, Kopf-Dicke, Durchpressen)
+    const weissF = glatt(t / 1.0);           // Phase 1
+    const dickeF = glatt((t - 1.1) / 0.9);   // Phase 2
+    const e = glatt((t - 1.2) / 1.4);
     const s = (R.breitePx / kamera.scale) / geo.spanX;
     const dickeBasis = R.dickeBasisPx;
     const dickeKopf = R.dickeKopfPx;
@@ -438,7 +441,7 @@ export function createRex3d(store, deps) {
     const pos = geo.pos;
     const K = store.kapseln;
     const WEISS = [0.93, 0.95, 0.94];
-    const alphaF = glatt((t - 0.05) / 0.6); // Linien blenden weich auf
+    const NT = [0.55, 0.78, 0.9]; // Farbe der Hintergrund-Gitterlinien
 
     // 1) KNOTEN zuerst: Ziele setzen + aktuelle Abweichung der Agenten
     // merken — die Linien hängen an den ECHTEN Agentenpositionen. Beim
@@ -454,8 +457,8 @@ export function createRex3d(store, deps) {
     for (const kn of knotIds) {
       const v = pos[geo.knoten[kn.k]];
       welt(v, s, e, sinY, cosY, W1);
-      store.homeX[kn.id] = W1.x;
-      store.homeY[kn.id] = W1.y;
+      // NUR die Ziele setzen — homeX/homeY bleiben unangetastet, damit
+      // das Gitter nach dem Schließen EXAKT wie vorher aussieht
       store.targetX[kn.id] = W1.x;
       store.targetY[kn.id] = W1.y;
       store.zPos[kn.id] = W1.z;
@@ -469,11 +472,17 @@ export function createRex3d(store, deps) {
       const poly = geo.polys[p];
       const info = geo.polyInfo[p];
       // Morph gerade → gekrümmt, gestaffelt von außen nach innen
-      const m = glatt((t - 0.35 - info.delay * R.morphSec * 0.5) / R.morphSec);
+      // Phase 2: Morph gerade → gekrümmt, gestaffelt von außen nach innen
+      const m = glatt((t - 1.0 - info.delay * R.morphSec * 0.5) / R.morphSec);
       const bri = R.briPlatte + (R.briKoerper - R.briPlatte) * info.h;
+      // Phase 1: das Rautengitter an der Rex-Stelle wird WEISS — die
+      // Linien starten im Look der Hintergrund-Gitterlinien
+      const cR = NT[0] + (WEISS[0] * bri - NT[0]) * weissF;
+      const cG = NT[1] + (WEISS[1] * bri - NT[1]) * weissF;
+      const cB = NT[2] + (WEISS[2] * bri - NT[2]) * weissF;
+      let alpha = 0.16 + (0.68 + 0.3 * info.h - 0.16) * weissF;
       // Körper-Linien tauchen erst mit dem Morph auf — am Anfang
-      // existiert NUR das Rauten-Gitter der Platte
-      let alpha = (0.68 + 0.3 * info.h) * alphaF;
+      // existiert NUR das Gitter der Platte
       if (info.h > 0.2) alpha *= 0.1 + 0.9 * m;
       if (alpha < 0.01) continue;
       const dicke = dickeBasis + (dickeKopf - dickeBasis) * info.h * dickeF;
@@ -498,9 +507,7 @@ export function createRex3d(store, deps) {
         project3d(P, kamera, W2.x, W2.y, W2.z, PR2);
         if (habe && !PR.hidden && !PR2.hidden) {
           const kM = (PR.k + PR2.k) / 2;
-          K.push(PR.x, PR.y, PR2.x, PR2.y,
-            WEISS[0] * bri, WEISS[1] * bri, WEISS[2] * bri, alpha,
-            dicke * kM);
+          K.push(PR.x, PR.y, PR2.x, PR2.y, cR, cG, cB, alpha, dicke * kM);
         }
         PR.x = PR2.x; PR.y = PR2.y; PR.k = PR2.k; PR.hidden = PR2.hidden;
         habe = true;

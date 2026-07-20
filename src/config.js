@@ -200,8 +200,8 @@ export const CONFIG = {
     breitePx: 270,        // Schwarms (Referenz 12): Linien = Kapsel-Pass,
     posX: 0.68,           // Agenten nur an den Platten-Knotenpunkten.
     posY: 0.58,           // breitePx/pos: screen-fest, rechts unter Mitte
-    dickeBasisPx: 1.2,    // Liniendicke der Platte …
-    dickeKopfPx: 3,       // … und im Kopfbereich (mit Transition)
+    dickeBasisPx: 0.9,    // Liniendicke der Platte (Referenz 12: zart) …
+    dickeKopfPx: 1.8,     // … und im Kopfbereich (mit Transition)
     morphSec: 1.2,        // gerade Gitterlinien → gekrümmte Kopf-Kurven
     skalAussen: 0.5,      // Knoten-Kacheln: außen 0.5 der Kachel → innen 0
     briPlatte: 0.62,      // Draht-Helligkeit der Platte …
@@ -226,6 +226,11 @@ export const CONFIG = {
     saug: 0.8,            //   3D-Drehung um die vertikale Achse, Ankunft
     welleKick: 2.2,       //   mit schneller Justier-Welle; saug = Zusatz-
   },                      //   Sog während des Flugs
+
+  verdichtung: {          // Kernfunktion: Fläche verdichtet sich auf 1×1 px
+    maxAgenten: 45000,    // Budget — größere Flächen vergröbern den Pitch
+    fliessSec: 0.9,       // Sanduhr-Fluss: außen → innen
+  },
 
   malen: {                // Paint (Referenz 05) — Offsets in Zellen vom Rahmen
     canvas: { dx: 2.3, dy: 2.5, w: 5.6, h: 3.5 }, // weiße Fläche (1px-Agenten)

@@ -32,7 +32,7 @@ export function attachInput(canvas, dirigent, kamera, actions) {
     if (pointers.size === 1) {
       const p = toScreen(e);
       swipeStart = p;
-      dirigent.onPointerDown(p.x, p.y);
+      dirigent.onPointerDown(p.x, p.y, e.ctrlKey);
     }
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
