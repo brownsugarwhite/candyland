@@ -27,6 +27,10 @@ export function createVerdichtung(store, deps) {
   let planIdx = 0;
   let pixelGroesse = 0;
   let flaeche = 0;     // Welt-Fläche des Rechtecks (für die Senken-Strömung)
+  let rekt = null;     // aktives Rechteck (für die Übergangszone)
+  let band = 1;        // Übergangszone in Zellen (bandPx / scale)
+  let fliegend = [];   // { id, norm } — Größe folgt der POSITION:
+                       // normal bis zur Zone, in der Zone → 1px
 
   const norm = (d) => ({
     x0: Math.min(d.x0, d.x1), x1: Math.max(d.x0, d.x1),
@@ -110,11 +114,18 @@ export function createVerdichtung(store, deps) {
       let a = Math.atan2(y - cy, x - cx) / (Math.PI * 2) + 0.5;
       return Math.min(SEK - 1, Math.floor(a * SEK));
     };
+    // Konsumiert wird NUR Rechteck + Übergangszone (bandPx) — alles
+    // dahinter bleibt normales Raster und rückt nur elastisch nach
+    rekt = { ...r };
+    band = Math.max(0.8, V.bandPx / kamera.scale);
     const quellen = Array.from({ length: SEK }, () => []);
     let nQuellen = 0;
     for (const i of store.carrierList) {
       if (store.active[i] === 0 || store.state[i] > STATE.RETURNING) continue;
       const hx = store.homeX[i], hy = store.homeY[i];
+      const ddx = hx < r.x0 ? r.x0 - hx : hx > r.x1 ? hx - r.x1 : 0;
+      const ddy = hy < r.y0 ? r.y0 - hy : hy > r.y1 ? hy - r.y1 : 0;
+      if (Math.hypot(ddx, ddy) > band) continue;
       quellen[sektor(hx, hy)].push({
         id: i, d: Math.hypot(hx - cx, hy - cy), x: hx, y: hy,
       });
@@ -169,13 +180,14 @@ export function createVerdichtung(store, deps) {
       });
     }
     plan.sort((a, b) => a.t - b.t);
-    // Fließband-Abschluss: das restliche Gitter (auch offcanvas) rückt
-    // um die geräumte Strecke nach und legt sich um die Fläche
+    // das restliche Gitter rückt um die geräumte Zone nach — der
+    // Gradient lebt in der Übergangszone, dahinter normales Raster
     const halbDiag = Math.hypot((r.x1 - r.x0) / 2, (r.y1 - r.y0) / 2);
     zone.cx = cx;
     zone.cy = cy;
-    zone.frontR = frontR;
-    zone.pullIn = Math.max(0, frontR - (halbDiag + 0.6));
+    zone.frontR = Math.max(frontR, halbDiag);
+    zone.pullIn = Math.max(0, zone.frontR - (halbDiag + band * 0.4));
+    zone.spanne = band * 1.6;
     flaeche = (r.x1 - r.x0) * (r.y1 - r.y0);
   }
 
@@ -197,40 +209,64 @@ export function createVerdichtung(store, deps) {
         store.frozen[id] = 0;
         store.targetX[id] = p.wx; // home bleibt unangetastet!
         store.targetY[id] = p.wy;
-        store.sizeTgt[id] = pixelGroesse;
         store.activateAt[id] = tNow;
         setAgentShape(store, id, SQUARE); // Abstand weg → quadratisch
         carriers.push({ id });
+        fliegend.push({ id, norm: Math.max(0.4, store.size[id]) });
       } else {
         const id = allocReserve(store, p.sx, p.sy);
         if (id < 0) continue;
-        // Nachschub sieht aus wie der Schwarm selbst: er startet in
-        // voller Kachelgröße als Squircle hinter der Front und wird
-        // beim Einwandern kleiner und quadratisch — kein fertig
-        // geschrumpftes Auftauchen
+        // Massen-Nachschub reist dichte-gekoppelt an (sonst flutet er
+        // das Bild): sichtbar, aber klein — geschrumpft auf 1 px wird
+        // NACH ORT erst in der Übergangszone (s. unten)
+        const norm = Math.min(0.5, pixelGroesse * 4);
         wakeAgent(store, id, tNow, 0, {
-          size: 0.8, shape: store.globalShape, taskId, swirl: true,
+          size: norm, shape: store.globalShape, taskId, swirl: true,
           px: p.sx, py: p.sy,
         });
-        store.size[id] = 0.55 + Math.random() * 0.3;
+        store.size[id] = norm * (0.7 + Math.random() * 0.3);
         setAgentShape(store, id, SQUARE);
         store.state[id] = STATE.IMAGE;
         store.targetX[id] = p.wx;
         store.targetY[id] = p.wy;
-        store.sizeTgt[id] = pixelGroesse;
         store.tgtR[id] = AG[0];
         store.tgtG[id] = AG[1];
         store.tgtB[id] = AG[2];
         ids.push(id);
+        fliegend.push({ id, norm });
       }
     }
     store.needsRebuild = true;
+
+    // GRÖSSE FOLGT DER POSITION: normal im Raster, ab ~bandPx vor dem
+    // Rechteck schrumpfen die Agenten auf 1×1 px, während sie ihre
+    // abstandslose Position einnehmen — die Übergangszone zeigt den
+    // Gradienten, dahinter bleibt alles normales Raster
+    if (rekt && fliegend.length > 0) {
+      const g = (x) => x * x * (3 - 2 * x);
+      for (let k = fliegend.length - 1; k >= 0; k--) {
+        const f = fliegend[k];
+        if (store.active[f.id] === 0 || store.frozen[f.id] === 1) {
+          fliegend[k] = fliegend[fliegend.length - 1];
+          fliegend.pop();
+          continue;
+        }
+        const px = store.posX[f.id], py = store.posY[f.id];
+        const dx = px < rekt.x0 ? rekt.x0 - px : px > rekt.x1 ? px - rekt.x1 : 0;
+        const dy = py < rekt.y0 ? rekt.y0 - py : py > rekt.y1 ? py - rekt.y1 : 0;
+        const d = Math.hypot(dx, dy);
+        const w = d >= band ? 1 : d / band;
+        store.sizeTgt[f.id] = pixelGroesse + (f.norm - pixelGroesse) * g(w);
+      }
+    }
   }
 
   function aufloesen(tNow = 0) {
     if (ids.length === 0 && carriers.length === 0 && plan.length === 0) return false;
     plan = [];
     planIdx = 0;
+    fliegend = [];
+    rekt = null;
     dissolveIds(ids);
     for (const c of carriers) revert(c.id);
     ids = [];
@@ -258,7 +294,7 @@ export function createVerdichtung(store, deps) {
       cx: zone.cx, cy: zone.cy,
       frontR: zone.frontR || 0,
       pullIn: (zone.pullIn || 0) * fill,
-      spanne: V.spanne, staerke, schrumpf: V.schrumpf,
+      spanne: zone.spanne || 2, staerke, schrumpf: V.schrumpf,
     }];
   }
 

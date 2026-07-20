@@ -227,12 +227,12 @@ export const CONFIG = {
     welleKick: 2.2,       //   mit schneller Justier-Welle; saug = Zusatz-
   },                      //   Sog während des Flugs
 
-  verdichtung: {          // Kernfunktion: Fläche verdichtet sich auf 1×1 px
-    maxAgenten: 45000,    // als Kettenreaktion durch das GANZE Mesh: die
-    kettenSpeed: 18,      // Welle (Zellen/s) konsumiert Ring für Ring; das
-    spanne: 9,            // restliche Gitter (auch offcanvas) rückt um die
-    schrumpf: 0.4,        // geräumte Strecke nach (Abklinglänge spanne)
-  },                      //   und wird zur Fläche hin kleiner
+  verdichtung: {          // Kernfunktion: Fläche verdichtet sich auf 1×1 px.
+    maxAgenten: 45000,    // Konsumiert wird Rechteck + Übergangszone
+    bandPx: 50,           // (bandPx): dort — und NUR dort — schrumpfen die
+    kettenSpeed: 18,      // einwandernden Agenten ortsabhängig auf 1 px;
+    schrumpf: 0.4,        // dahinter bleibt das normale Raster und rückt
+  },                      //   nur elastisch nach (Welle: kettenSpeed)
 
   malen: {                // Paint (Referenz 05) — Offsets in Zellen vom Rahmen
     canvas: { dx: 2.3, dy: 2.5, w: 5.6, h: 3.5 }, // weiße Fläche (1px-Agenten)
