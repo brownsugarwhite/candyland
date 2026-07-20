@@ -207,8 +207,10 @@ export function createVerdichtung(store, deps) {
     zone.cx = cx;
     zone.cy = cy;
     zone.frontR = Math.max(frontR, halbDiag);
-    zone.pullIn = Math.max(0, zone.frontR - (halbDiag + band * 0.4));
-    zone.spanne = band * 1.6;
+    // sanfter, gedeckelter Zug — das Raster rückt nach, es stürzt nicht
+    zone.pullIn = Math.min(band * 1.2,
+      Math.max(0, zone.frontR - (halbDiag + band * 0.4)));
+    zone.spanne = 6;
     flaeche = (r.x1 - r.x0) * (r.y1 - r.y0);
   }
 
@@ -249,7 +251,9 @@ export function createVerdichtung(store, deps) {
         });
         store.size[id] = norm * (0.8 + Math.random() * 0.2);
         if (!p.raster) setAgentShape(store, id, SQUARE);
-        store.state[id] = STATE.IMAGE;
+        // Raster-Gäste bleiben lebendig (kein Einfrieren), Flächen-
+        // Pixel frieren nach Ankunft ein
+        store.state[id] = p.raster ? STATE.RETURNING : STATE.IMAGE;
         store.targetX[id] = p.wx;
         store.targetY[id] = p.wy;
         store.tgtR[id] = AG[0];
@@ -278,7 +282,10 @@ export function createVerdichtung(store, deps) {
         const dx = px < rekt.x0 ? rekt.x0 - px : px > rekt.x1 ? px - rekt.x1 : 0;
         const dy = py < rekt.y0 ? rekt.y0 - py : py > rekt.y1 ? py - rekt.y1 : 0;
         const d = Math.hypot(dx, dy);
-        const w = d >= band ? 1 : d / band;
+        // mit Vorlauf: das Schrumpfen beginnt sichtbar VOR der Zone,
+        // damit es auch bei schnellem Flug als Übergang lesbar ist
+        const bandS = band + 1.2;
+        const w = d >= bandS ? 1 : d / bandS;
         store.sizeTgt[f.id] = pixelGroesse + (f.norm - pixelGroesse) * g(w);
       }
     }
