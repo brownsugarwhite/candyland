@@ -228,12 +228,12 @@ export const CONFIG = {
   },                      //   Sog während des Flugs
 
   verdichtung: {          // Kernfunktion: Fläche verdichtet sich auf 1×1 px
-    maxAgenten: 45000,    // als Kettenreaktion mit SENKEN-STRÖMUNG:
-    wachsSpeed: 2.6,      // Fläche wächst Ring für Ring (Zellen/s), die
-    fangWeite: 2.2,       // Umgebung bis fangWeite wird selbst Teil davon,
-    sogFaktor: 0.85,      // und die Senke u = A·sogFaktor/(2πd) zieht
-    uMax: 4.2,            // JEDEN Agenten lückenlos nach (uMax = Deckel
-    schrumpf: 0.4,        // nahe der Front; schrumpf = Kleinerwerden)
+    maxAgenten: 45000,    // als Kettenreaktion durch das GANZE Netz:
+    kettenSpeed: 22,      // die Welle läuft mit kettenSpeed (Zellen/s)
+    fangWeite: 2.2,       // nach außen; Umgebung bis fangWeite wird Teil
+    sogFaktor: 0.75,      // der Fläche, Nachschub wandert von JENSEITS
+    uMax: 2.8,            // des Sichtfensters ein; Senke u = A·f/(2πd)
+    schrumpf: 0.4,        // zieht jeden Agenten lückenlos nach
   },
 
   malen: {                // Paint (Referenz 05) — Offsets in Zellen vom Rahmen

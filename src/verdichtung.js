@@ -95,49 +95,76 @@ export function createVerdichtung(store, deps) {
     }
     pixel.sort((a, b) => a.d - b.d); // Fläche wächst aus der Mitte
 
-    // Rekrutiert werden die UMLIEGENDEN Schwarmagenten selbst — bis
-    // fangWeite jenseits des Rechtecks. Sie rücken wie an einem Netz
-    // nach innen nach; erst jenseits davon übernimmt Nachschub, der in
-    // voller Kachelgröße an der Front startet und einwandernd schrumpft
-    const traeger = [];
+    // Das ganze Netz ist EINE Quelle: absorbiert wird die nahe
+    // Umgebung (bis fangWeite); weiterer Nachschub entsteht NUR
+    // außerhalb des Sichtfensters und wandert sichtbar von außen ein —
+    // nichts erscheint im Bild aus dem Nichts. Zuordnung über
+    // WINKEL-SEKTOREN: jedes Pixel bekommt eine Quelle aus seiner
+    // Richtung → alle Bahnen laufen radial, niemand überfliegt
+    // jemanden, ein einziger organischer Strom.
+    const SEK = 48;
+    const sektor = (x, y) => {
+      let a = Math.atan2(y - cy, x - cx) / (Math.PI * 2) + 0.5;
+      return Math.min(SEK - 1, Math.floor(a * SEK));
+    };
+    const quellen = Array.from({ length: SEK }, () => []);
+    let nQuellen = 0;
     for (const i of store.carrierList) {
       if (store.active[i] === 0 || store.state[i] > STATE.RETURNING) continue;
       const hx = store.homeX[i], hy = store.homeY[i];
       const ddx = hx < r.x0 ? r.x0 - hx : hx > r.x1 ? hx - r.x1 : 0;
       const ddy = hy < r.y0 ? r.y0 - hy : hy > r.y1 ? hy - r.y1 : 0;
       if (Math.hypot(ddx, ddy) > V.fangWeite) continue;
-      traeger.push({ i, d: Math.hypot(hx - cx, hy - cy) });
+      quellen[sektor(hx, hy)].push({
+        id: i, d: Math.hypot(hx - cx, hy - cy), x: hx, y: hy,
+      });
+      nQuellen++;
     }
-    traeger.sort((a, b) => a.d - b.d); // die Nächsten kondensieren zuerst
+    // Nachschub-Quellen: dichte Ringe JENSEITS des Sichtfensters
+    const kx = kamera.cx, ky = kamera.cy;
+    const hwV = kamera.viewW / 2 / kamera.scale;
+    const hhV = kamera.viewH / 2 / kamera.scale;
+    let sichtR = 0;
+    for (const [ex, ey] of [[kx - hwV, ky - hhV], [kx + hwV, ky - hhV],
+      [kx - hwV, ky + hhV], [kx + hwV, ky + hhV]]) {
+      sichtR = Math.max(sichtR, Math.hypot(ex - cx, ey - cy));
+    }
+    let ringR = sichtR + 0.8;
+    while (nQuellen < pixel.length) {
+      const n = Math.max(8, Math.round((ringR * 6.2832) / 0.4));
+      for (let k = 0; k < n && nQuellen < pixel.length * 1.02; k++) {
+        // kräftiger Jitter — der Strom soll organisch wirken, nicht
+        // als konzentrische Ringe
+        const a = ((k + Math.random()) / n) * Math.PI * 2;
+        const rr = ringR + Math.random() * 0.9;
+        const x = cx + Math.cos(a) * rr;
+        const y = cy + Math.sin(a) * rr;
+        quellen[sektor(x, y)].push({ id: -1, d: rr, x, y });
+        nQuellen++;
+      }
+      ringR += 0.45;
+    }
+    for (const q of quellen) q.sort((a, b) => a.d - b.d);
 
-    // ALLE Schritte takten sich am Wachstum der Fläche (Mitte → außen,
-    // wachsSpeed Zellen/s) — sie füllt sich Ring für Ring; Nachschub
-    // startet HINTER der Schwarmfront und strömt mit dem Feld herein
-    const halbDiag = Math.hypot((r.x1 - r.x0) / 2, (r.y1 - r.y0) / 2);
-    const frontR = traeger.length > 0
-      ? Math.max(traeger[traeger.length - 1].d, halbDiag)
-      : halbDiag + V.fangWeite;
+    // Zuordnung Pixel (Mitte → außen) ↔ Quelle (innen → außen) im
+    // gleichen Sektor; die WELLE läuft mit kettenSpeed durch das Netz:
+    // jede Quelle startet, wenn die Kettenreaktion sie erreicht
+    const zeiger = new Int32Array(SEK);
     plan = [];
     planIdx = 0;
     for (let k = 0; k < pixel.length; k++) {
       const p = pixel[k];
-      const t = tNow + p.d / V.wachsSpeed + Math.random() * 0.06;
-      if (k < traeger.length) {
-        plan.push({ t, id: traeger[k].i, wx: p.wx, wy: p.wy });
-      } else {
-        let dx = p.wx - cx, dy = p.wy - cy;
-        const len = Math.hypot(dx, dy);
-        if (len < 1e-3) {
-          const a = Math.random() * Math.PI * 2;
-          dx = Math.cos(a); dy = Math.sin(a);
-        } else { dx /= len; dy /= len; }
-        const dist = frontR + 0.3 + Math.random() * 3.2;
-        plan.push({
-          t, id: -1, wx: p.wx, wy: p.wy,
-          sx: cx + dx * dist + (Math.random() - 0.5) * 1.1,
-          sy: cy + dy * dist + (Math.random() - 0.5) * 1.1,
-        });
+      const s0 = sektor(p.wx, p.wy);
+      let q = null;
+      for (let off = 0; off < SEK; off++) {
+        const s = (s0 + (off % 2 === 0 ? off / 2 : -(off + 1) / 2) + SEK) % SEK;
+        if (zeiger[s] < quellen[s].length) { q = quellen[s][zeiger[s]++]; break; }
       }
+      if (!q) break;
+      plan.push({
+        t: tNow + q.d / V.kettenSpeed + Math.random() * 0.12,
+        id: q.id, wx: p.wx, wy: p.wy, sx: q.x, sy: q.y,
+      });
     }
     plan.sort((a, b) => a.t - b.t);
     flaeche = (r.x1 - r.x0) * (r.y1 - r.y0); // Welt-Fläche für den Sog
