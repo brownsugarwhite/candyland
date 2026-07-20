@@ -122,6 +122,9 @@ export function createVerdichtung(store, deps) {
       return { wx, wy, delay };
     };
 
+    // Die Kacheln unter dem Rechteck sind der ANFANG der Animation:
+    // sie skalieren SOFORT auf 1px und rücken auf ihr Pixel — kein
+    // Warten, kein Dimmen, kein Verschwinden
     for (const c of carriers) {
       const z = ziel(c.idx);
       store.state[c.id] = STATE.IMAGE;
@@ -130,15 +133,17 @@ export function createVerdichtung(store, deps) {
       store.targetX[c.id] = z.wx; // home bleibt unangetastet!
       store.targetY[c.id] = z.wy;
       store.sizeTgt[c.id] = size;
-      store.activateAt[c.id] = tNow + z.delay;
+      store.activateAt[c.id] = tNow;
     }
+    // … erst danach breitet sich die Verdichtung aus: die restlichen
+    // Pixel füllen sich von der Mitte nach außen aus dem Schwarm
     for (let idx = 0; idx < cols * rows; idx++) {
       if (belegt.has(idx)) continue;
       const id = allocReserve(store, cx, cy);
       if (id < 0) break;
       const z = ziel(idx);
       const [sx, sy] = randStart(r, z.wx, z.wy);
-      wakeAgent(store, id, tNow, z.delay, {
+      wakeAgent(store, id, tNow, V.startPause + z.delay, {
         size: 0.02, shape: SQUARE, taskId, swirl: true, px: sx, py: sy,
       });
       store.state[id] = STATE.IMAGE; // friert nach Ankunft ein
