@@ -7,7 +7,8 @@
 import { CONFIG } from './config.js';
 import { formenInfo } from './formen.js';
 import {
-  INST_FLOATS, packInstances, LINE_FLOATS, packLines, lineCapacity, hexToRgb01,
+  INST_FLOATS, packInstances, LINE_FLOATS, packLines, lineCapacity,
+  KAPSEL_FLOATS, packKapseln, kapselCapacity, hexToRgb01,
 } from './renderformat.js';
 
 const VS_BG = `#version 300 es
@@ -115,6 +116,56 @@ void main() {
     col = mix(col, smear, min(1.0, sm));
   }
   outColor = vec4(col, 1.0);
+}`;
+
+// KAPSELN: dicke weiche Linien (Rex' Drahtgitter) — instanzierte Quads,
+// im Fragment-Shader die Kapsel-Distanz (runde Enden, weiches AA)
+const VS_KAPSEL = `#version 300 es
+layout(location=0) in vec4 a_seg;   // x0, y0, x1, y1 (Pseudo-Welt)
+layout(location=1) in vec4 a_col;
+layout(location=2) in float a_dicke; // Screen-px
+uniform vec4 u_cam;   // cx, cy, scale, –
+uniform vec2 u_view;
+out vec2 v_pos;
+flat out vec2 v_p0;
+flat out vec2 v_p1;
+flat out float v_halb;
+out vec4 v_col;
+void main() {
+  vec2 s0 = (a_seg.xy - u_cam.xy) * u_cam.z + u_view * 0.5;
+  vec2 s1 = (a_seg.zw - u_cam.xy) * u_cam.z + u_view * 0.5;
+  vec2 dir = s1 - s0;
+  float len = max(length(dir), 1e-4);
+  dir /= len;
+  vec2 n = vec2(-dir.y, dir.x);
+  float halb = a_dicke * 0.5 + 1.0; // + AA-Rand
+  float ax = float(gl_VertexID & 1);
+  float ay = float(gl_VertexID >> 1) * 2.0 - 1.0;
+  vec2 pos = mix(s0, s1, ax) + dir * (ax * 2.0 - 1.0) * halb + n * ay * halb;
+  vec2 clip = pos / u_view * 2.0 - 1.0;
+  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+  v_pos = pos;
+  v_p0 = s0;
+  v_p1 = s1;
+  v_halb = a_dicke * 0.5;
+  v_col = a_col;
+}`;
+
+const FS_KAPSEL = `#version 300 es
+precision highp float;
+in vec2 v_pos;
+flat in vec2 v_p0;
+flat in vec2 v_p1;
+flat in float v_halb;
+in vec4 v_col;
+out vec4 outColor;
+void main() {
+  vec2 ab = v_p1 - v_p0;
+  float t = clamp(dot(v_pos - v_p0, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+  float d = length(v_pos - (v_p0 + ab * t)) - v_halb;
+  float alpha = (1.0 - smoothstep(-0.75, 0.75, d)) * v_col.a;
+  if (alpha < 0.004) discard;
+  outColor = vec4(v_col.rgb * alpha, alpha);
 }`;
 
 const VS_LINES = `#version 300 es
@@ -336,6 +387,23 @@ export function createRendererGL(canvas, view) {
   gl.enableVertexAttribArray(1);
   gl.vertexAttribPointer(1, 4, gl.FLOAT, false, LINE_FLOATS * 4, 8);
 
+  // Kapseln (dicke weiche Linien) — instanzierte Quads
+  const progKap = link(gl, VS_KAPSEL, FS_KAPSEL);
+  gl.useProgram(progKap);
+  gl.uniform2f(gl.getUniformLocation(progKap, 'u_view'), view.w, view.h);
+  const uCamKap = gl.getUniformLocation(progKap, 'u_cam');
+  const vaoKap = gl.createVertexArray();
+  gl.bindVertexArray(vaoKap);
+  const vboKap = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vboKap);
+  const strideKap = KAPSEL_FLOATS * 4;
+  for (const [loc, n, off] of [[0, 4, 0], [1, 4, 16], [2, 1, 32]]) {
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, n, gl.FLOAT, false, strideKap, off);
+    gl.vertexAttribDivisor(loc, 1);
+  }
+  let kapArr = new Float32Array(256 * KAPSEL_FLOATS);
+
   let arr = new Float32Array(0);
   let lnArr = new Float32Array(0);
 
@@ -360,6 +428,19 @@ export function createRendererGL(canvas, view) {
       gl.bindBuffer(gl.ARRAY_BUFFER, vboLn);
       gl.bufferData(gl.ARRAY_BUFFER, lnArr.subarray(0, ln.nTotal * LINE_FLOATS), gl.DYNAMIC_DRAW);
       if (ln.nMesh > 0) gl.drawArrays(gl.LINES, 0, ln.nMesh);
+    }
+
+    // Kapseln (Rex' Drahtgitter) — NACH den Mesh-Linien, VOR den Agenten
+    const kapCap = kapselCapacity(store) * KAPSEL_FLOATS;
+    if (kapArr.length < kapCap) kapArr = new Float32Array(Math.ceil(kapCap * 1.3));
+    const nKap = packKapseln(store, kapArr);
+    if (nKap > 0) {
+      gl.useProgram(progKap);
+      gl.uniform4f(uCamKap, kamera.cx, kamera.cy, kamera.scale, 0);
+      gl.bindVertexArray(vaoKap);
+      gl.bindBuffer(gl.ARRAY_BUFFER, vboKap);
+      gl.bufferData(gl.ARRAY_BUFFER, kapArr.subarray(0, nKap * KAPSEL_FLOATS), gl.DYNAMIC_DRAW);
+      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, nKap);
     }
 
     if (arr.length < store.activeCount * INST_FLOATS) {
@@ -413,9 +494,11 @@ export function createRendererGL(canvas, view) {
       gl.deleteProgram(prog);
       gl.deleteProgram(progBg);
       gl.deleteProgram(progLn);
+      gl.deleteProgram(progKap);
       gl.deleteProgram(progPost);
       gl.deleteBuffer(vbo);
       gl.deleteBuffer(vboLn);
+      gl.deleteBuffer(vboKap);
       gl.deleteTexture(tex);
       gl.deleteTexture(sceneTex);
       gl.deleteFramebuffer(fbo);

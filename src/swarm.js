@@ -77,6 +77,7 @@ export function createSwarm(gitter, defaultShape, tNow = 0) {
   store.meshEnabled = CONFIG.neural.enabled;
   store.edges = gitter.edges;
   store.extraLines = []; // [x0,y0,x1,y1, r,g,b,a] je Linie (0..1) — pro Frame
+  store.kapseln = []; // dicke weiche Linien [x0,y0,x1,y1,r,g,b,a,dickePx]
   store.linse = { holes: [], tunnelT: 0, tcx: 0, tcy: 0, zeit: 0 }; // Post-FX
   store.p3d = { // echte 3D-Lochkamera (renderformat.project3d)
     aktiv: false, holes: [],

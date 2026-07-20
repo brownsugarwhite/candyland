@@ -857,6 +857,7 @@ export function createDirigent(store, kamera) {
     cursor.wy = (cursor.sy - kamera.viewH / 2) / kamera.scale + kamera.cy;
 
     store.extraLines.length = 0; // freie Linien werden pro Frame neu gemeldet
+    store.kapseln.length = 0;    // dicke Linien (Rex) ebenso
 
     if (store.needsRebuild) {
       rebuildActiveList(store);

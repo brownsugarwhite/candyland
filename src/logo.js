@@ -101,11 +101,13 @@ export function createLogo(store, registerTask, kamera) {
     for (const [key, shape] of [['k1', 'klaue1'], ['k2', 'klaue2']]) {
       const id = allocReserve(store, w.x, w.y);
       if (id < 0) continue;
-      wakeAgent(store, id, tNow, 0.3, {
+      // das Rex-Icon soll SOFORT da sein — kein langsames Einfaden
+      wakeAgent(store, id, tNow, 0.05, {
         size: 0.02, shape: shapeId(shape), taskId: taskRex, swirl: false,
         px: w.x, py: w.y,
       });
       store.state[id] = STATE.TEXT;
+      store.brightness[id] = 0.55;
       claws[key] = id;
     }
     store.needsRebuild = true;

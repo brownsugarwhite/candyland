@@ -1,18 +1,30 @@
-// REX IN 3D — der Dirigent erhebt sich als lebendiges Käfig-Drahtgitter
-// aus dem Schwarm (Referenz: Blender-Screenshot mit 2× Subsurface).
-// assets/obj/rex.obj liefert den GROBEN Käfig samt der gewölbten
-// Squircle-Platte, aus der Rex herauswächst (die Platte liegt auf der
-// Schwarmebene → nahtloser Übergang in den Schwarm). Zwei Catmull-Clark-
-// Schritte glätten die Geometrie; gezeichnet werden NUR die Ur-Käfig-
-// kanten als weiche 4-Segment-Kurven — wie ein NICHT angewandter
-// Subsurface-Modifier. Knoten = kleine runde Agenten, Kantensegmente =
-// lang gestreckte Agenten (store.aspekt); die Liniendicke wächst
-// perspektivisch zur Kamera (project3d + Instanzgröße·k). Der Kopf
-// schaut dem Cursor nach.
+// REX — der Dirigent morpht aus den VERBINDUNGSLINIEN des Schwarms
+// (Referenz 12): Die Linien sind ECHTE Linien (Kapsel-Pass in den
+// Renderern), KEINE Agenten; Agenten sitzen nur an den Knotenpunkten
+// des subdividierten Käfigs — und nur auf der Platte. Ablauf beim
+// Claws-Klick:
+//   1. die betroffenen Gitteragenten skalieren nach Nähe zum Rex
+//      (außen ~0.5 der Kachelgröße, am inneren Ring → 0),
+//   2. die Linien im Kopfbereich werden mit Transition ~3px dick,
+//   3. aus den geraden Gitterlinien formen sich smooth die gekrümmten
+//      Kurven des Rexkopfs (Morph gerade → subdividierte Kurve,
+//      gestaffelt von außen nach innen), während Kopf und Arme sich
+//      von hinten durch das Gitter pressen (z-Hub).
+// Die radialen Speichen laufen über den Plattenrand hinaus und docken
+// an echte, volle Gitterkacheln an — der Schwarm ist sichtbar direkt
+// mit Rex' Drahtgitter verbunden.
+//
+// VORBEREITUNG FÜR DIE BLENDER-ANIMATION: Catmull-Clark ist LINEAR in
+// den Käfig-Vertices. Beim Laden entsteht die Gewichtsmatrix
+// (geo.gewichte: Level-2-Punkt = Σ wᵢ·CageVertᵢ). Eine animierte Pose
+// (glTF Shape Keys oder OBJ-Sequenz mit identischer Topologie) muss
+// nur die Käfig-Vertices liefern — applyPose() erzeugt daraus die
+// glatten Kurven, Linien und Knoten folgen automatisch. Der
+// „Durchpress"-Eindruck: die Platte bleibt bei Modell-minZ fix,
+// Kopf/Arme animieren primär in Modell-z Richtung Kamera.
 import { CONFIG } from './config.js';
 import { STATE, wakeAgent, allocReserve } from './swarm.js';
 import { project3d } from './renderformat.js';
-import { shapeId } from './formen.js';
 
 // ---- OBJ-Parser (nur v/f; f-Indizes "12/3/4" → 12) ------------------------
 function parseObj(text) {
@@ -60,22 +72,21 @@ function filterRex(mesh) {
   return { verts, faces };
 }
 
-// ---- Catmull-Clark mit Randregeln + Abbildungen fürs Kanten-Tracking ------
+// ---- Catmull-Clark, GENERISCH über eine lineare Algebra -------------------
+// add/mul arbeiten auf opaken Werten: mit Vektoren liefert der Schritt
+// Positionen, mit Gewichts-Maps die Subdivisions-GEWICHTSMATRIX
+// (Grundlage für spätere Käfig-Animationen). Randregeln inklusive.
 const eKey = (a, b) => (a < b ? a * 131072 + b : b * 131072 + a);
 
-function ccStep(mesh) {
-  const { verts, faces } = mesh;
+function ccStep(verts, faces, add, mul) {
   const nV = verts.length;
-  const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-  const mul = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
 
   const facePts = faces.map((f) => {
-    let p = [0, 0, 0];
-    for (const i of f) p = add(p, verts[i]);
+    let p = null;
+    for (const i of f) p = p === null ? verts[i] : add(p, verts[i]);
     return mul(p, 1 / f.length);
   });
 
-  // Kanten sammeln
   const edges = new Map(); // key → { a, b, faces: [] }
   faces.forEach((f, fi) => {
     for (let k = 0; k < f.length; k++) {
@@ -121,11 +132,14 @@ function ccStep(mesh) {
       p = mul(add(add(verts[a], verts[b]), mul(verts[i], 6)), 1 / 8);
     } else {
       const n = vFaces[i].length;
-      let F = [0, 0, 0];
-      for (const fi of vFaces[i]) F = add(F, facePts[fi]);
+      let F = null;
+      for (const fi of vFaces[i]) F = F === null ? facePts[fi] : add(F, facePts[fi]);
       F = mul(F, 1 / n);
-      let R = [0, 0, 0];
-      for (const e of vEdges[i]) R = add(R, mul(add(verts[e.a], verts[e.b]), 0.5));
+      let R = null;
+      for (const e of vEdges[i]) {
+        const m = mul(add(verts[e.a], verts[e.b]), 0.5);
+        R = R === null ? m : add(R, m);
+      }
       R = mul(R, 1 / vEdges[i].length);
       p = mul(add(add(F, mul(R, 2)), mul(verts[i], n - 3)), 1 / n);
     }
@@ -147,6 +161,30 @@ function ccStep(mesh) {
   return { verts: newVerts, faces: newFaces, edgeIdx, vertIdx };
 }
 
+// Gewichts-Algebra: ein Wert = Map(cageIdx → Gewicht)
+const wAdd = (a, b) => {
+  const m = new Map(a);
+  for (const [k, v] of b) m.set(k, (m.get(k) || 0) + v);
+  return m;
+};
+const wMul = (a, s) => {
+  const m = new Map();
+  for (const [k, v] of a) m.set(k, v * s);
+  return m;
+};
+
+// Käfig-Pose → glatte Level-2-Positionen (linear, deshalb animierbar)
+function applyPose(cage, gewichte) {
+  return gewichte.map((g) => {
+    let x = 0, y = 0, z = 0;
+    for (const [i, w] of g) {
+      const v = cage[i];
+      x += v[0] * w; y += v[1] * w; z += v[2] * w;
+    }
+    return [x, y, z];
+  });
+}
+
 // Polylinien der Ur-Kanten durch einen Subdivisionsschritt verfeinern
 function refine(polys, step) {
   return polys.map((poly) => {
@@ -162,23 +200,30 @@ function refine(polys, step) {
 export function createRex3d(store, deps) {
   const { kamera, registerTask, dissolveIds, revert, cursor } = deps;
   const R = CONFIG.rex3d;
-  let geo = null;        // { punkte: Float32Array(3n), polys, knoten, lade }
+  let geo = null;
   let offen = false;
   let t0 = 0;
   let mitte = { x: 0, y: 0 };
   let yaw = 0;
   let taskId = 0;
-  let segIds = [];       // ein Agent je Kantensegment
-  let knotIds = [];      // ein Agent je Ur-Vertex
+  let knotIds = [];       // { id, gitter, k } — nur Platten-Knoten
+  let anschluss = [];     // { k (Knoten-Index), carrier (Gitteragent) }
   const PR = { x: 0, y: 0, k: 1, dim: 1, hidden: false };
   const PR2 = { x: 0, y: 0, k: 1, dim: 1, hidden: false };
+  const W1 = { x: 0, y: 0, z: 0 };
+  const W2 = { x: 0, y: 0, z: 0 };
+  const glatt = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+
+  const log = (m) => {
+    (window.__rexLog = window.__rexLog || []).push(m);
+  };
 
   let ladePromise = null;
 
   async function lade() {
     const text = await (await fetch('assets/obj/rex.obj')).text();
     const cage = filterRex(parseObj(text));
-    // Käfig-Polylinien: jede Ur-Kante, Knoten: jeder Ur-Vertex
+    // Käfig-Polylinien: jede Ur-Kante; Knoten: jeder Ur-Vertex
     let polys = [];
     const seen = new Set();
     for (const f of cage.faces) {
@@ -188,18 +233,20 @@ export function createRex3d(store, deps) {
         if (!seen.has(key)) { seen.add(key); polys.push([a, b]); }
       }
     }
-    let mesh = cage;
+    // ZWEI Subdivisionsschritte auf der GEWICHTSMATRIX (linear →
+    // animierbar); Positionen kommen aus applyPose(cage-Pose)
+    let wVerts = cage.verts.map((_, i) => new Map([[i, 1]]));
+    let faces = cage.faces;
     let knoten = cage.verts.map((_, i) => i);
     for (let s = 0; s < 2; s++) {
-      const step = ccStep(mesh);
+      const step = ccStep(wVerts, faces, wAdd, wMul);
       polys = refine(polys, step);
       knoten = knoten.map((i) => step.vertIdx[i]);
-      mesh = step;
+      wVerts = step.verts;
+      faces = step.faces;
     }
-    // Die Hintergrund-PLATTE liegt bei Modell-minZ und dient nur der
-    // Orientierung + dem weichen Übergang: sie kommt auf die Schwarm-
-    // ebene (z = 0), Rex' Kopf und Arme (großes Modell-z) drücken sich
-    // von hinten durch das Drahtgitter nach oben (Welt-z < 0).
+    const pos = applyPose(cage.verts, wVerts);
+
     let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
     for (const v of cage.verts) {
       if (v[0] < minX) minX = v[0];
@@ -207,24 +254,36 @@ export function createRex3d(store, deps) {
       if (v[2] < minZ) minZ = v[2];
       if (v[2] > maxZ) maxZ = v[2];
     }
-    // Punkte in Modellkoordinaten behalten (Transform passiert je Frame)
+    const spanX = maxX - minX;
     const spanZ = Math.max(1e-3, maxZ - minZ);
-    const g = (x) => x * x * (3 - 2 * x);
+    const halbePlatte = spanX / 2;
+    const hoehe = (v) => glatt((v[2] - minZ) / spanZ); // 0 Platte … 1 Kopf
+
+    // je Polyline: Endknoten (Level-2), Kopf-Faktor, Stagger-Delay
+    const polyInfo = polys.map((poly) => {
+      const a = pos[poly[0]], b = pos[poly[poly.length - 1]];
+      const h = Math.max(hoehe(a), hoehe(b));
+      const r = Math.hypot((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) / halbePlatte;
+      return { h, delay: 1 - Math.min(1, r) }; // außen zuerst, innen später
+    });
+
+    // Knoten: nur die PLATTE bekommt Agenten; radiale Lage fürs
+    // Größen-Gefälle außen 0.5 → innen 0
+    const knotInfo = knoten.map((ki) => {
+      const v = pos[ki];
+      const h = hoehe(v);
+      const r = Math.min(1.2, Math.hypot(v[0], v[1]) / halbePlatte);
+      return { h, r, platte: h < 0.16, rand: h < 0.16 && r > 0.82 };
+    });
+
     geo = {
-      mesh, polys, knoten,
-      spanX: maxX - minX, minZ, spanZ,
-      // Höhenfaktor je Knoten: 0 = Platte, 1 = Körper/Kopf
-      knotH: knoten.map((ki) =>
-        g(Math.min(1, Math.max(0, (mesh.verts[ki][2] - minZ) / spanZ)))),
+      pos, polys, polyInfo, knoten, knotInfo, gewichte: wVerts,
+      spanX, minZ, spanZ, halbePlatte,
     };
   }
 
   // Geometrie schon beim Boot vorladen — der erste Klick baut sofort
   ladePromise = lade().catch(() => { ladePromise = null; });
-
-  const log = (m) => {
-    (window.__rexLog = window.__rexLog || []).push(m);
-  };
 
   function open(tNow) {
     log(`open t=${tNow.toFixed(2)} geo=${!!geo}`);
@@ -236,50 +295,26 @@ export function createRex3d(store, deps) {
     mitte = { x: Math.round(w.x) + 0.5, y: Math.round(w.y) + 0.5 };
     if (!taskId) taskId = registerTask('rex: erhebt sich', true);
     if (!geo) {
-      (ladePromise || (ladePromise = lade())).then(() => { if (offen && !segIds.length) baue(); });
+      (ladePromise || (ladePromise = lade())).then(() => {
+        if (offen && !knotIds.length) baue();
+      });
       return;
     }
     baue();
   }
 
-  const WEISS = [236, 242, 239];
-
   function baue() {
-    const nSeg = geo.polys.reduce((n, p) => n + p.length - 1, 0);
-    log(`baue nSeg=${nSeg} frei=${store.freeCount}`);
-    segIds = [];
+    log(`baue polys=${geo.polys.length} frei=${store.freeCount}`);
     knotIds = [];
-    const verts = geo.mesh.verts;
-    const glatt = (x) => x * x * (3 - 2 * x);
-    // Kantensegmente (Reserve-Agenten): die Platte zart und dunkler,
-    // Rex' Körper heller — abgestuft nach Modell-Höhe (Referenz 12)
-    for (const poly of geo.polys) {
-      for (let k = 1; k < poly.length; k++) {
-        const id = allocReserve(store, mitte.x, mitte.y);
-        if (id < 0) break;
-        wakeAgent(store, id, t0, Math.random() * 0.7, {
-          size: 0.02, shape: shapeId('squircle'), taskId, swirl: true,
-          px: mitte.x + (Math.random() - 0.5) * 7,
-          py: mitte.y + (Math.random() - 0.5) * 6,
-        });
-        store.state[id] = STATE.TEXT;
-        const zM = (verts[poly[k - 1]][2] + verts[poly[k]][2]) / 2;
-        const h = glatt(Math.min(1, Math.max(0, (zM - geo.minZ) / geo.spanZ)));
-        const bri = R.briPlatte + (R.briKoerper - R.briPlatte) * h;
-        store.tgtR[id] = store.colR[id] = WEISS[0] * bri;
-        store.tgtG[id] = store.colG[id] = WEISS[1] * bri;
-        store.tgtB[id] = store.colB[id] = WEISS[2] * bri;
-        segIds.push(id);
-      }
-    }
-    // KNOTEN: die Gitteragenten UNTER Rex' Fläche verdichten/lockern
-    // sich auf die Eckpunktzahl des Käfigs (jeder übernimmt den ihm
-    // nächsten Eckpunkt — der Schwarm selbst wird Rex), fehlende
-    // Knoten kommen aus der Reserve; das Schachbrett drumherum bleibt
+    anschluss = [];
     const s0 = (R.breitePx / kamera.scale) / geo.spanX;
-    const kPos = geo.knoten.map((ki) => {
-      const v = geo.mesh.verts[ki];
-      return { x: mitte.x + v[0] * s0, y: mitte.y - v[1] * s0, id: -1 };
+    // Platten-Knoten: die Gitteragenten unter Rex verdichten/lockern
+    // sich auf diese Punkte — jeder übernimmt den nächstgelegenen
+    const kPos = [];
+    geo.knoten.forEach((ki, k) => {
+      if (!geo.knotInfo[k].platte) return; // Körper: KEINE Knoten-Agenten
+      const v = geo.pos[ki];
+      kPos.push({ k, x: mitte.x + v[0] * s0, y: mitte.y - v[1] * s0, id: -1 });
     });
     const radius = (R.breitePx / kamera.scale) * 0.55;
     const unter = [];
@@ -297,53 +332,60 @@ export function createRex3d(store, deps) {
         if (d2 < bestD) { bestD = d2; best = k; }
       }
       if (best < 0) break;
-      // die Kachel BLEIBT ein Squircle — sie schrumpft nur und bindet
-      // sich als Knoten ins Drahtgitter (Referenz 12)
       kPos[best].id = i;
       store.state[i] = STATE.TEXT;
       store.taskId[i] = taskId;
       store.frozen[i] = 0;
     }
+    const AG = store.baseTint;
     knotIds = kPos.map((p) => {
-      if (p.id >= 0) return { id: p.id, gitter: true };
-      const id = allocReserve(store, mitte.x, mitte.y);
+      if (p.id >= 0) return { id: p.id, gitter: true, k: p.k };
+      const id = allocReserve(store, p.x, p.y);
       if (id < 0) return null;
-      wakeAgent(store, id, t0, Math.random() * 0.7, {
-        size: 0.02, shape: shapeId('squircle'), taskId, swirl: true,
-        px: p.x + (Math.random() - 0.5) * 4,
-        py: p.y + (Math.random() - 0.5) * 4,
+      wakeAgent(store, id, t0, Math.random() * 0.5, {
+        size: 0.02, shape: store.globalShape, taskId, swirl: true,
+        px: p.x + (Math.random() - 0.5) * 3,
+        py: p.y + (Math.random() - 0.5) * 3,
       });
       store.state[id] = STATE.TEXT;
-      const AG = store.baseTint;
       store.tgtR[id] = store.colR[id] = AG[0] * 0.85;
       store.tgtG[id] = store.colG[id] = AG[1] * 0.85;
       store.tgtB[id] = store.colB[id] = AG[2] * 0.85;
-      return { id, gitter: false };
+      return { id, gitter: false, k: p.k };
     }).filter(Boolean);
+
+    // Anschluss-Speichen: Rand-Knoten der Platte → nächste VOLLE
+    // Gitterkachel (nicht rekrutiert) — der Schwarm läuft in Rex hinein
+    for (const kn of knotIds) {
+      if (!geo.knotInfo[kn.k].rand) continue;
+      const v = geo.pos[geo.knoten[kn.k]];
+      const wx = mitte.x + v[0] * s0, wy = mitte.y - v[1] * s0;
+      let best = -1, bestD = Infinity;
+      for (const i of store.carrierList) {
+        if (store.active[i] === 0 || store.state[i] > STATE.RETURNING) continue;
+        const dx = store.homeX[i] - wx, dy = store.homeY[i] - wy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD && d2 > 0.2) { bestD = d2; best = i; }
+      }
+      if (best >= 0 && bestD < 20) anschluss.push({ k: kn.k, carrier: best });
+    }
     store.needsRebuild = true;
-    log(`baue fertig segs=${segIds.length} knoten=${knotIds.length}`);
+    log(`baue fertig knoten=${knotIds.length} anschluss=${anschluss.length}`);
   }
 
   function close() {
     if (!offen) return;
     log('close');
     offen = false;
-    dissolveIds(segIds);
-    for (const id of segIds) {
-      store.zPos[id] = 0;
-      store.aspekt[id] = 1;
-    }
-    // Gitter-Knoten lockern sich zurück in den Schwarm, Reserve löst auf
     const reserveKnoten = [];
     for (const kn of knotIds) {
       store.zPos[kn.id] = 0;
-      store.aspekt[kn.id] = 1;
       if (kn.gitter) revert(kn.id);
       else reserveKnoten.push(kn.id);
     }
     dissolveIds(reserveKnoten);
-    segIds = [];
     knotIds = [];
+    anschluss = [];
   }
 
   // Modellpunkt → Welt (x, y, z<0 = über der Fläche), mit Kopf-Yaw.
@@ -366,74 +408,83 @@ export function createRex3d(store, deps) {
     return out;
   }
 
-  const W1 = { x: 0, y: 0, z: 0 };
-  const W2 = { x: 0, y: 0, z: 0 };
-
   function update(tNow, dt) {
-    if (!offen || !geo || segIds.length === 0) return;
+    if (!offen || !geo || knotIds.length === 0) return;
     const P = store.p3d;
-    const glatt = (x) => x * x * (3 - 2 * x);
-    const e = glatt(Math.min(1, (tNow - t0) / R.hebSec));
-    // Screen-feste Maße → Weltmaße bei aktuellem Zoom
+    const t = tNow - t0;
+    // Phasen: (1) Agenten skalieren, (2) Linien verdicken sich im
+    // Kopfbereich, (3) gerade → gekrümmt + Durchpressen — alles weich
+    const dickeF = glatt((t - 0.2) / 0.9);
+    const e = glatt((t - 0.7) / 1.5);
     const s = (R.breitePx / kamera.scale) / geo.spanX;
-    const dicke = R.dickePx / kamera.scale;
-    const knotenMax = R.knotenPx / kamera.scale;
-    const knotenMin = R.knotenMinPx / kamera.scale;
+    const dickeBasis = R.dickeBasisPx;
+    const dickeKopf = R.dickeKopfPx;
     // der Kopf folgt dem Cursor — weich, nie snappend
     const zielYaw = cursor.active
       ? Math.max(-R.maxYaw, Math.min(R.maxYaw, (cursor.wx - mitte.x) * 0.09))
       : 0;
     yaw += (zielYaw - yaw) * Math.min(1, 3.5 * dt);
     const sinY = Math.sin(yaw), cosY = Math.cos(yaw);
+    const atme = Math.sin(tNow * 0.9) * R.atmen;
 
-    const verts = geo.mesh.verts;
-    let sIdx = 0;
-    for (const poly of geo.polys) {
-      welt(verts[poly[0]], s, e, sinY, cosY, W1);
-      project3d(P, kamera, W1.x, W1.y, W1.z, PR);
-      for (let k = 1; k < poly.length; k++) {
-        const id = segIds[sIdx++];
-        if (id === undefined) return;
-        welt(verts[poly[k]], s, e, sinY, cosY, W2);
+    const pos = geo.pos;
+    const K = store.kapseln;
+    const WEISS = [0.93, 0.95, 0.94];
+
+    for (let p = 0; p < geo.polys.length; p++) {
+      const poly = geo.polys[p];
+      const info = geo.polyInfo[p];
+      // Morph gerade → gekrümmt, gestaffelt von außen nach innen
+      const m = glatt((t - 0.35 - info.delay * R.morphSec * 0.5) / R.morphSec);
+      const bri = R.briPlatte + (R.briKoerper - R.briPlatte) * info.h;
+      const alpha = 0.68 + 0.3 * info.h;
+      const dicke = dickeBasis + (dickeKopf - dickeBasis) * info.h * dickeF;
+      const A = pos[poly[0]], B = pos[poly[poly.length - 1]];
+      let habe = false;
+      for (let k = 0; k < poly.length; k++) {
+        const v = pos[poly[k]];
+        const f = k / (poly.length - 1);
+        // gerade Gitterlinie → subdividierte Kurve
+        const mx = (A[0] + (B[0] - A[0]) * f) * (1 - m) + v[0] * m;
+        const my = (A[1] + (B[1] - A[1]) * f) * (1 - m) + v[1] * m;
+        const mz = (A[2] + (B[2] - A[2]) * f) * (1 - m) + v[2] * m;
+        welt([mx, my, mz + atme * info.h], s, e, sinY, cosY, W2);
         project3d(P, kamera, W2.x, W2.y, W2.z, PR2);
-        if (PR.hidden || PR2.hidden) {
-          store.sizeTgt[id] = 0;
-        } else {
-          // Agent = das Segment: Welt-Mitte + z; Länge/Winkel aus der
-          // Projektion → Dicke wächst zur Kamera (·k im Packing).
-          // Leichter Überstand (×1.3), damit die Linie DURCHGEZOGEN
-          // wirkt, nie gestrichelt
-          const mx = (W1.x + W2.x) / 2, my = (W1.y + W2.y) / 2;
-          store.homeX[id] = mx;
-          store.homeY[id] = my;
-          store.targetX[id] = mx;
-          store.targetY[id] = my;
-          // subtiles Atmen — das Drahtgitter lebt
-          store.zPos[id] = (W1.z + W2.z) / 2 +
-            Math.sin(tNow * 0.9 + sIdx * 0.37) * R.atmen * R.breitePx / kamera.scale;
-          const len = Math.hypot(PR2.x - PR.x, PR2.y - PR.y) * 1.3;
-          const kMid = (PR.k + PR2.k) / 2;
-          store.sizeTgt[id] = dicke;
-          store.rot[id] = Math.atan2(PR2.y - PR.y, PR2.x - PR.x);
-          store.aspekt[id] = Math.max(0.2, len / Math.max(dicke * kMid, 1e-4));
+        if (habe && !PR.hidden && !PR2.hidden) {
+          const kM = (PR.k + PR2.k) / 2;
+          K.push(PR.x, PR.y, PR2.x, PR2.y,
+            WEISS[0] * bri, WEISS[1] * bri, WEISS[2] * bri, alpha,
+            dicke * kM);
         }
         PR.x = PR2.x; PR.y = PR2.y; PR.k = PR2.k; PR.hidden = PR2.hidden;
-        W1.x = W2.x; W1.y = W2.y; W1.z = W2.z;
+        habe = true;
       }
     }
-    for (let k = 0; k < knotIds.length; k++) {
-      const id = knotIds[k].id;
-      const v = verts[geo.knoten[k]];
+
+    // Anschluss-Speichen: Platte → volle Gitterkacheln des Schwarms
+    const anBri = R.briPlatte * 0.9;
+    for (const an of anschluss) {
+      const v = pos[geo.knoten[an.k]];
       welt(v, s, e, sinY, cosY, W1);
-      store.homeX[id] = W1.x;
-      store.homeY[id] = W1.y;
-      store.targetX[id] = W1.x;
-      store.targetY[id] = W1.y;
-      store.zPos[id] = W1.z;
-      // Platten-Knoten = sichtbare kleine Kacheln, Körper-Knoten
-      // verschwinden fast im Draht (Referenz 12)
-      store.sizeTgt[id] = knotenMax + (knotenMin - knotenMax) * geo.knotH[k];
-      store.aspekt[id] = 1;
+      project3d(P, kamera, W1.x, W1.y, W1.z, PR);
+      project3d(P, kamera, store.posX[an.carrier], store.posY[an.carrier], 0, PR2);
+      if (PR.hidden || PR2.hidden) continue;
+      K.push(PR.x, PR.y, PR2.x, PR2.y,
+        WEISS[0] * anBri, WEISS[1] * anBri, WEISS[2] * anBri, 0.55,
+        dickeBasis * (PR.k + PR2.k) / 2);
+    }
+
+    // Platten-Knoten: außen ~0.5 der Kachelgröße, innen → 0
+    for (const kn of knotIds) {
+      const v = pos[geo.knoten[kn.k]];
+      welt(v, s, e, sinY, cosY, W1);
+      store.homeX[kn.id] = W1.x;
+      store.homeY[kn.id] = W1.y;
+      store.targetX[kn.id] = W1.x;
+      store.targetY[kn.id] = W1.y;
+      store.zPos[kn.id] = W1.z;
+      const r = geo.knotInfo[kn.k].r;
+      store.sizeTgt[kn.id] = R.skalAussen * glatt((r - 0.3) / 0.6);
     }
   }
 
@@ -450,17 +501,19 @@ export function createRex3d(store, deps) {
     toggle(tNow) { if (offen) close(); else open(tNow); },
     get isOpen() { return offen; },
     debug() { // Headless-Diagnose
-      if (!segIds.length) return { segs: 0 };
-      const id = segIds[0], kid = knotIds[0] && knotIds[0].id;
-      const agent = (i) => i === undefined ? null : {
-        i, aktiv: store.active[i], st: store.state[i],
-        pos: [+store.posX[i].toFixed(2), +store.posY[i].toFixed(2)],
-        tgt: [+store.targetX[i].toFixed(2), +store.targetY[i].toFixed(2)],
-        size: +store.size[i].toFixed(3), sizeTgt: +store.sizeTgt[i].toFixed(3),
-        asp: +store.aspekt[i].toFixed(2), z: +store.zPos[i].toFixed(2),
-        bri: +store.brightness[i].toFixed(2),
+      if (!knotIds.length) return { knoten: 0 };
+      const kn = knotIds[0];
+      return {
+        knoten: knotIds.length,
+        anschluss: anschluss.length,
+        kapseln: store.kapseln.length / 9,
+        knot0: {
+          i: kn.id, gitter: kn.gitter,
+          size: +store.size[kn.id].toFixed(3),
+          sizeTgt: +store.sizeTgt[kn.id].toFixed(3),
+          z: +store.zPos[kn.id].toFixed(2),
+        },
       };
-      return { segs: segIds.length, knoten: knotIds.length, seg0: agent(id), knot0: agent(kid) };
     },
   };
 }

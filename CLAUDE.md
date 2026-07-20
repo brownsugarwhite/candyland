@@ -29,21 +29,24 @@ Diese Regeln sind verbindlich für alles, was in diesem Projekt entsteht.
 
 - **Rex verwaltet den Schwarm** und ist immer über das Claws-Icon oben rechts
   erreichbar (2 Kratzer = 2 Agenten, `assets/svg/claws.svg`).
-- **Klick auf die Claws** (Referenz `12_rex_demo_final`): Rex drückt
-  sich als zartes, lebendiges Käfig-Drahtgitter mit Kopf und Armen von
-  hinten durch den Schwarm (`src/rex3d.js`, Modell
-  `assets/obj/rex.obj`; die mitmodellierte Hintergrundplatte liegt auf
-  der Schwarmebene — Orientierung + weicher Übergang). Zwei
-  Catmull-Clark-Schritte; gezeichnet werden NUR die Ur-Käfigkanten als
-  weiche, durchgezogene 4-Segment-Kurven (~1.3px, Dicke wächst
-  perspektivisch; Platte dunkler, Körper heller). Er sitzt rechts
-  unter der Bildmitte, ist SCREEN-fest (~270px, zoomt nicht mit) und
-  atmet subtil. Die Gitteragenten unter ihm verdichten/lockern sich
-  auf die Käfig-Eckpunkte und BLEIBEN kleine Squircle-Kacheln
-  (Platten-Knoten sichtbar, Körper-Knoten fast unsichtbar); fehlende
-  Knoten aus der Reserve; das umliegende Gitter weicht per Anker-Warp
-  sanft aus. Der Kopf (nicht die Platte!) schaut dem Cursor nach. Esc
-  oder Claws-Klick schickt ihn zurück.
+- **Klick auf die Claws** (Referenz `12_rex_demo_final`): Rex morpht
+  aus den VERBINDUNGSLINIEN des Schwarms (`src/rex3d.js`, Modell
+  `assets/obj/rex.obj`). Die Linien sind ECHTE Linien — der
+  Kapsel-Pass der Renderer (`store.kapseln`, instanzierte Quads mit
+  Kapsel-SDF, Dicke in px) — KEINE Agenten; Agenten sitzen nur an den
+  Knotenpunkten der Platte. Intro: (1) betroffene Gitteragenten
+  skalieren nach Nähe (außen ~0.5 der Kachel, innen → 0), (2) Linien
+  im Kopfbereich verdicken sich mit Transition auf ~3px, (3) aus den
+  geraden Gitterlinien formen sich smooth die gekrümmten Kurven
+  (Morph gerade → subdividierte Kurve, gestaffelt von außen nach
+  innen), während Kopf und Arme sich von hinten durchs Gitter pressen
+  (z-Hub). Rand-Speichen docken an echte volle Gitterkacheln an.
+  Screen-fest (~270px) rechts unter der Mitte; Kopf folgt dem Cursor;
+  Esc/Claws schließt. Die Subdivision ist als GEWICHTSMATRIX abgelegt
+  (geo.gewichte, Catmull-Clark ist linear): spätere Blender-Posen
+  (glTF Shape Keys / OBJ-Sequenz gleicher Topologie) müssen nur die
+  Käfig-Vertices liefern — applyPose() erzeugt die glatten Kurven,
+  Linien und Knoten folgen automatisch.
 - Rex' Intelligenz ist die Claude-API (`src/brain.js`, Key via „key"-Befehl,
   localStorage). Einzelne Agenten haben lokale, simulierte Autonomie und eine
   Identität (deterministischer Name aus der Agenten-Id, z. B. „Agent Vega 4000").

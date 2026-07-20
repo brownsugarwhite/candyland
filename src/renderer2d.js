@@ -29,6 +29,20 @@ export function createRenderer2D(canvas, view) {
     const ox = view.w / 2 - kamera.cx * scale;
     const oy = view.h / 2 - kamera.cy * scale;
 
+    // Kapseln (Rex' Drahtgitter) — unter den Agenten, runde Enden
+    const K = store.kapseln;
+    if (K && K.length > 0) {
+      ctx.lineCap = 'round';
+      for (let k = 0; k + 8 < K.length; k += 9) {
+        ctx.strokeStyle = `rgba(${(K[k + 4] * 255) | 0},${(K[k + 5] * 255) | 0},${(K[k + 6] * 255) | 0},${K[k + 7]})`;
+        ctx.lineWidth = Math.max(1, K[k + 8]);
+        ctx.beginPath();
+        ctx.moveTo(K[k] * scale + ox, K[k + 1] * scale + oy);
+        ctx.lineTo(K[k + 2] * scale + ox, K[k + 3] * scale + oy);
+        ctx.stroke();
+      }
+    }
+
     const {
       activeList, activeCount, active, posX, posY, size, brightness,
       colR, colG, colB, state, latticeCount,

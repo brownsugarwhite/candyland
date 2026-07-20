@@ -6,7 +6,8 @@
 import { CONFIG } from './config.js';
 import { formenInfo } from './formen.js';
 import {
-  INST_FLOATS, packInstances, LINE_FLOATS, packLines, lineCapacity, hexToRgb01,
+  INST_FLOATS, packInstances, LINE_FLOATS, packLines, lineCapacity,
+  KAPSEL_FLOATS, packKapseln, kapselCapacity, hexToRgb01,
 } from './renderformat.js';
 
 const WGSL = (grid) => /* wgsl */ `
@@ -95,6 +96,52 @@ struct LOut { @builtin(position) pos: vec4f, @location(0) col: vec4f };
 
 @fragment fn fsLine(in: LOut) -> @location(0) vec4f {
   return vec4f(in.col.rgb * in.col.a, in.col.a);
+}
+
+// ---- Kapseln: dicke weiche Linien (Rex' Drahtgitter) -------------------
+@group(0) @binding(5) var<storage, read> kapseln: array<f32>;
+
+struct KOut {
+  @builtin(position) pos: vec4f,
+  @location(0) p: vec2f,
+  @location(1) @interpolate(flat) p0: vec2f,
+  @location(2) @interpolate(flat) p1: vec2f,
+  @location(3) @interpolate(flat) halb: f32,
+  @location(4) col: vec4f,
+};
+
+@vertex fn vsKapsel(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> KOut {
+  let o = ii * ${KAPSEL_FLOATS}u;
+  let s0 = (vec2f(kapseln[o], kapseln[o + 1u]) - cam.center) * cam.scale + cam.view * 0.5;
+  let s1 = (vec2f(kapseln[o + 2u], kapseln[o + 3u]) - cam.center) * cam.scale + cam.view * 0.5;
+  let col = vec4f(kapseln[o + 4u], kapseln[o + 5u], kapseln[o + 6u], kapseln[o + 7u]);
+  let dicke = kapseln[o + 8u];
+  var dir = s1 - s0;
+  let len = max(length(dir), 1e-4);
+  dir = dir / len;
+  let n = vec2f(-dir.y, dir.x);
+  let halb = dicke * 0.5 + 1.0; // + AA-Rand
+  let ax = f32(vi & 1u);
+  let ay = f32(vi >> 1u) * 2.0 - 1.0;
+  let pos = mix(s0, s1, ax) + dir * (ax * 2.0 - 1.0) * halb + n * ay * halb;
+  let clip = pos / cam.view * 2.0 - 1.0;
+  var out: KOut;
+  out.pos = vec4f(clip.x, -clip.y, 0.0, 1.0);
+  out.p = pos;
+  out.p0 = s0;
+  out.p1 = s1;
+  out.halb = dicke * 0.5;
+  out.col = col;
+  return out;
+}
+
+@fragment fn fsKapsel(in: KOut) -> @location(0) vec4f {
+  let ab = in.p1 - in.p0;
+  let t = clamp(dot(in.p - in.p0, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+  let d = length(in.p - (in.p0 + ab * t)) - in.halb;
+  let alpha = (1.0 - smoothstep(-0.75, 0.75, d)) * in.col.a;
+  if (alpha < 0.004) { discard; }
+  return vec4f(in.col.rgb * alpha, alpha);
 }
 
 // ---- Post-Process: ECHTE Gravitationslinse + Durchflug-Aberration ------
@@ -292,6 +339,11 @@ export async function createRendererGPU(canvas, view) {
     size: lineCap * LINE_FLOATS * 4,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
+  let kapCap = 1 << 12; // Kapsel-Segmente (Rex' Drahtgitter)
+  let kapBuf = device.createBuffer({
+    size: kapCap * KAPSEL_FLOATS * 4,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
 
   const layout = device.createBindGroupLayout({
     entries: [
@@ -300,6 +352,7 @@ export async function createRendererGPU(canvas, view) {
       { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
       { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
       { binding: 4, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
+      { binding: 5, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
     ],
   });
   const makeBindGroup = () => device.createBindGroup({
@@ -310,6 +363,7 @@ export async function createRendererGPU(canvas, view) {
       { binding: 2, resource: atlasTex.createView() },
       { binding: 3, resource: sampler },
       { binding: 4, resource: { buffer: lineBuf } },
+      { binding: 5, resource: { buffer: kapBuf } },
     ],
   });
   let bindGroup = makeBindGroup();
@@ -358,6 +412,12 @@ export async function createRendererGPU(canvas, view) {
     fragment: { module, entryPoint: 'fsLine', targets: [{ format, blend }] },
     primitive: { topology: 'line-list' },
   });
+  const pipeKapsel = device.createRenderPipeline({
+    layout: pipeLayout,
+    vertex: { module, entryPoint: 'vsKapsel' },
+    fragment: { module, entryPoint: 'fsKapsel', targets: [{ format, blend }] },
+    primitive: { topology: 'triangle-strip' },
+  });
   const pipePost = device.createRenderPipeline({
     layout: pipeLayoutPost,
     vertex: { module, entryPoint: 'vsPost' },
@@ -379,6 +439,7 @@ export async function createRendererGPU(canvas, view) {
 
   let arr = new Float32Array(instCap * INST_FLOATS);
   let lnArr = new Float32Array(lineCap * LINE_FLOATS);
+  let kapArr = new Float32Array(kapCap * KAPSEL_FLOATS);
 
   function render(store, kamera) {
     if (formen.version !== atlasVersion) uploadAtlas();
@@ -403,8 +464,22 @@ export async function createRendererGPU(canvas, view) {
       lnArr = new Float32Array(lineCap * LINE_FLOATS);
       bindGroup = makeBindGroup();
     }
+    if (kapselCapacity(store) > kapCap) {
+      kapCap = Math.ceil(kapselCapacity(store) * 1.3);
+      kapBuf.destroy();
+      kapBuf = device.createBuffer({
+        size: kapCap * KAPSEL_FLOATS * 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      kapArr = new Float32Array(kapCap * KAPSEL_FLOATS);
+      bindGroup = makeBindGroup();
+    }
     const n = packInstances(store, kamera, arr);
     const ln = packLines(store, kamera, lnArr);
+    const nKap = packKapseln(store, kapArr);
+    if (nKap > 0) {
+      device.queue.writeBuffer(kapBuf, 0, kapArr, 0, nKap * KAPSEL_FLOATS);
+    }
 
     uniData[0] = kamera.cx;
     uniData[1] = kamera.cy;
@@ -446,6 +521,10 @@ export async function createRendererGPU(canvas, view) {
     if (ln.nMesh > 0) {
       pass.setPipeline(pipeLine);
       pass.draw(ln.nMesh);
+    }
+    if (nKap > 0) { // Rex' Drahtgitter — unter den Knoten-Agenten
+      pass.setPipeline(pipeKapsel);
+      pass.draw(4, nKap);
     }
     if (n > 0) {
       pass.setPipeline(pipeInst);

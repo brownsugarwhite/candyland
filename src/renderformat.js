@@ -252,6 +252,31 @@ export function lineCapacity(store) {
   return (store.edges ? store.edges.length : 0) + store.extraLines.length / 4 + 64;
 }
 
+// ---- KAPSELN: dicke, weiche Linien (Rex' Drahtgitter) ---------------------
+// store.kapseln (pro Frame neu): [x0, y0, x1, y1, r, g, b, a, dickePx] je
+// Segment — Endpunkte in Pseudo-Welt, Dicke in Screen-px. Gezeichnet als
+// instanzierte Quads mit Kapsel-SDF (runde Enden → durchgezogene weiche
+// Kurvenzüge). Instanz-Format: 12 f32 (Padding für WebGPU-Alignment).
+export const KAPSEL_FLOATS = 12;
+
+export function packKapseln(store, arr) {
+  const K = store.kapseln;
+  let w = 0;
+  for (let k = 0; k + 8 < K.length; k += 9) {
+    arr[w++] = K[k];     arr[w++] = K[k + 1];
+    arr[w++] = K[k + 2]; arr[w++] = K[k + 3];
+    arr[w++] = K[k + 4]; arr[w++] = K[k + 5];
+    arr[w++] = K[k + 6]; arr[w++] = K[k + 7];
+    arr[w++] = K[k + 8];
+    arr[w++] = 0; arr[w++] = 0; arr[w++] = 0;
+  }
+  return w / KAPSEL_FLOATS;
+}
+
+export function kapselCapacity(store) {
+  return store.kapseln.length / 9 + 8;
+}
+
 export function hexToRgb01(hex) {
   const v = parseInt(hex.slice(1), 16);
   return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];

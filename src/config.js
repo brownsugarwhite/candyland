@@ -196,20 +196,20 @@ export const CONFIG = {
     neigung: 0.55,        // 1/dimm Zellen); neigung = Kippwinkel (rad) des
   },                      // „frei"-Befehls (Perspektive entsperren)
 
-  rex3d: {                // Rex als zartes Käfig-Drahtgitter (Referenz 12):
-    breitePx: 270,        // Plattenbreite in SCREEN-px — Rex bleibt beim
-    posX: 0.68,           // Zoomen immer gleich groß; Position (Anteil
-    posY: 0.58,           // der Screenfläche, rechts unter der Mitte)
-    hebSec: 1.8,          // Erheben aus der Fläche
-    dickePx: 1.3,         // Drahtdicke px (wächst perspektivisch)
-    knotenPx: 7,          // Platten-Knoten = kleine Squircle-Kacheln;
-    knotenMinPx: 2.5,     //   am Körper werden die Knoten fast unsichtbar
-    briPlatte: 0.75,      // Draht-Helligkeit der Platte …
-    briKoerper: 1.05,     // … und des Körpers (heller)
+  rex3d: {                // Rex morpht aus den VERBINDUNGSLINIEN des
+    breitePx: 270,        // Schwarms (Referenz 12): Linien = Kapsel-Pass,
+    posX: 0.68,           // Agenten nur an den Platten-Knotenpunkten.
+    posY: 0.58,           // breitePx/pos: screen-fest, rechts unter Mitte
+    dickeBasisPx: 1.2,    // Liniendicke der Platte …
+    dickeKopfPx: 3,       // … und im Kopfbereich (mit Transition)
+    morphSec: 1.2,        // gerade Gitterlinien → gekrümmte Kopf-Kurven
+    skalAussen: 0.5,      // Knoten-Kacheln: außen 0.5 der Kachel → innen 0
+    briPlatte: 0.62,      // Draht-Helligkeit der Platte …
+    briKoerper: 1.0,      // … und des Körpers (heller)
     kopfAb: 0.15,         // Modell-z, ab dem der Kopf beginnt …
     kopfSpan: 0.7,        // … und wie weich er in den Körper übergeht
     maxYaw: 0.5,          // maximale Kopfdrehung zum Cursor (rad)
-    atmen: 0.014,         // subtiles Atmen des Drahtgitters (·Breite)
+    atmen: 0.06,          // subtiles Atmen des Kopf-Drahts (Modell-Einheiten)
   },
 
   tunnel: {               // „Tunnel" = Schwarzes Loch mit ECHTER Gravita-
