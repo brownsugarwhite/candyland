@@ -26,6 +26,7 @@ export function createVerdichtung(store, deps) {
   let plan = [];       // { t, id|-1, sx, sy, wx, wy } sortiert nach t
   let planIdx = 0;
   let pixelGroesse = 0;
+  let flaeche = 0;     // Welt-Fläche des Rechtecks (für die Senken-Strömung)
 
   const norm = (d) => ({
     x0: Math.min(d.x0, d.x1), x1: Math.max(d.x0, d.x1),
@@ -94,25 +95,28 @@ export function createVerdichtung(store, deps) {
     }
     pixel.sort((a, b) => a.d - b.d); // Fläche wächst aus der Mitte
 
-    // Rekrutiert werden NUR die Kacheln im Rechteck plus eine schmale
-    // Marge — der restliche Schwarm bleibt bestehen und rückt über den
-    // Sog nach (er wird gezogen, aber nicht absorbiert)
-    const marge = V.kettenMarge;
+    // Rekrutiert werden die UMLIEGENDEN Schwarmagenten selbst — bis
+    // fangWeite jenseits des Rechtecks. Sie rücken wie an einem Netz
+    // nach innen nach; erst jenseits davon übernimmt Nachschub, der in
+    // voller Kachelgröße an der Front startet und einwandernd schrumpft
     const traeger = [];
     for (const i of store.carrierList) {
       if (store.active[i] === 0 || store.state[i] > STATE.RETURNING) continue;
       const hx = store.homeX[i], hy = store.homeY[i];
-      if (hx < r.x0 - marge || hx > r.x1 + marge ||
-          hy < r.y0 - marge || hy > r.y1 + marge) continue;
+      const ddx = hx < r.x0 ? r.x0 - hx : hx > r.x1 ? hx - r.x1 : 0;
+      const ddy = hy < r.y0 ? r.y0 - hy : hy > r.y1 ? hy - r.y1 : 0;
+      if (Math.hypot(ddx, ddy) > V.fangWeite) continue;
       traeger.push({ i, d: Math.hypot(hx - cx, hy - cy) });
     }
     traeger.sort((a, b) => a.d - b.d); // die Nächsten kondensieren zuerst
 
     // ALLE Schritte takten sich am Wachstum der Fläche (Mitte → außen,
     // wachsSpeed Zellen/s) — sie füllt sich Ring für Ring; Nachschub
-    // strömt dicht über die nächstgelegene Rechteck-Kante ein
-    const hw = Math.max(1e-3, (r.x1 - r.x0) / 2);
-    const hh = Math.max(1e-3, (r.y1 - r.y0) / 2);
+    // startet HINTER der Schwarmfront und strömt mit dem Feld herein
+    const halbDiag = Math.hypot((r.x1 - r.x0) / 2, (r.y1 - r.y0) / 2);
+    const frontR = traeger.length > 0
+      ? Math.max(traeger[traeger.length - 1].d, halbDiag)
+      : halbDiag + V.fangWeite;
     plan = [];
     planIdx = 0;
     for (let k = 0; k < pixel.length; k++) {
@@ -127,17 +131,16 @@ export function createVerdichtung(store, deps) {
           const a = Math.random() * Math.PI * 2;
           dx = Math.cos(a); dy = Math.sin(a);
         } else { dx /= len; dy /= len; }
-        // Randpunkt des Rechtecks in Zielrichtung + kurz dahinter
-        const s = Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh, 1e-4);
-        const aus = 0.3 + Math.random() * 1.8;
+        const dist = frontR + 0.3 + Math.random() * 3.2;
         plan.push({
           t, id: -1, wx: p.wx, wy: p.wy,
-          sx: cx + dx / s + dx * aus + (Math.random() - 0.5) * 0.7,
-          sy: cy + dy / s + dy * aus + (Math.random() - 0.5) * 0.7,
+          sx: cx + dx * dist + (Math.random() - 0.5) * 1.1,
+          sy: cy + dy * dist + (Math.random() - 0.5) * 1.1,
         });
       }
     }
     plan.sort((a, b) => a.t - b.t);
+    flaeche = (r.x1 - r.x0) * (r.y1 - r.y0); // Welt-Fläche für den Sog
   }
 
   // Die Kettenreaktion läuft: pro Frame werden genau die Schritte
@@ -165,9 +168,16 @@ export function createVerdichtung(store, deps) {
       } else {
         const id = allocReserve(store, p.sx, p.sy);
         if (id < 0) continue;
+        // Nachschub sieht aus wie der Schwarm selbst: er startet in
+        // voller Kachelgröße als Squircle hinter der Front und wird
+        // beim Einwandern kleiner und quadratisch — kein fertig
+        // geschrumpftes Auftauchen
         wakeAgent(store, id, tNow, 0, {
-          size: 0.02, shape: SQUARE, taskId, swirl: true, px: p.sx, py: p.sy,
+          size: 0.8, shape: store.globalShape, taskId, swirl: true,
+          px: p.sx, py: p.sy,
         });
+        store.size[id] = 0.55 + Math.random() * 0.3;
+        setAgentShape(store, id, SQUARE);
         store.state[id] = STATE.IMAGE;
         store.targetX[id] = p.wx;
         store.targetY[id] = p.wy;
@@ -205,9 +215,13 @@ export function createVerdichtung(store, deps) {
       if (t > zone.ende + 0.75) { zone = null; return null; }
     }
     if (staerke <= 0.001) return null;
+    // A wächst mit dem Füllstand — die Strömung schwillt an, während
+    // die Fläche kondensiert (Senke: u = A/(2πd) in swarm.postStep)
+    const fill = plan.length > 0 ? planIdx / plan.length : 1;
     return [{
       x0: zone.x0, y0: zone.y0, x1: zone.x1, y1: zone.y1,
-      staerke, zug: V.zug, schrumpf: V.schrumpf, reich: V.reich,
+      staerke, A: flaeche * fill * V.sogFaktor,
+      uMax: V.uMax, schrumpf: V.schrumpf,
     }];
   }
 
