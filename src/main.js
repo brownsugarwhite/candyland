@@ -113,6 +113,7 @@ async function build(mode, viewW, viewH) {
       warpRects: dirigent.warpRects,
       veil: dirigent.veil,
       anchors: dirigent.anchors,
+      zonen: dirigent.zonen,
       wellen,
     });
     dirigent.update(w.tSim);

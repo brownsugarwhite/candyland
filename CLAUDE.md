@@ -18,12 +18,16 @@ Diese Regeln sind verbindlich für alles, was in diesem Projekt entsteht.
    Agenten mit wenigen Aufgaben werden meistens größer dargestellt;
    Verdichtung passiert dort, wo sie gebraucht wird.
    KERNFUNKTION `src/verdichtung.js`: eine Fläche verdichtet sich
-   unabhängig von der Zoomstufe von AUSSEN nach INNEN, die Agenten
-   FLIESSEN von außen über den nächsten Rand ein (Sanduhr-Prinzip,
-   nie einblenden/teleportieren); Gitteragenten darunter machen mit
-   und kehren beim Auflösen exakt an ihre Plätze zurück (homeX/homeY
-   von Gitteragenten wird NIE überschrieben — nur targetX/targetY).
-   Test-UI: ctrl + linke Maustaste zieht ein Rechteck, Esc löst auf.
+   unabhängig von der Zoomstufe von der MITTE nach außen; die Agenten
+   strömen radial aus dem umliegenden Schwarm ein (nie einblenden/
+   teleportieren), und der SOG betrifft den GANZEN Schwarm: alle
+   übrigen Agenten rücken kreisförmig näher ans Feld und werden zu
+   ihm hin organisch kleiner (Zonen-Warp env.zonen in swarm.postStep)
+   — die Fläche wirkt aus dem Schwarm gemorpht. Gitteragenten in und
+   um die Fläche machen mit und kehren beim Auflösen exakt an ihre
+   Plätze zurück (homeX/homeY von Gitteragenten wird NIE
+   überschrieben — nur targetX/targetY). Test-UI: ctrl + linke
+   Maustaste zieht ein Rechteck, Esc löst auf (Sog ebbt weich ab).
 4. **Stabile Identität.** Agentenidentität = Gitterzellen-Index im Welt-Gitter
    (1 Welteinheit = 1 Zelle). Zoomen ändert NUR die Kamera (`src/kamera.js`)
    — niemals ordnen sich Agenten beim Zoomen neu an.

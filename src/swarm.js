@@ -361,6 +361,26 @@ export function postStep(store, tSim, dtFrame, env) {
       // seine Ruhelage, die Trichter-Projektion (renderformat) zieht es
       // rein visuell in die Tiefe — echtes 3D statt Verdrängung.
 
+      // VERDICHTUNG zieht den GANZEN Schwarm: alle Agenten rücken
+      // kreisförmig näher an das verdichtete Feld (der Sog schließt die
+      // Lücke, die die rekrutierten Agenten hinterlassen) und werden
+      // zum Feld hin organisch etwas kleiner — die Fläche wirkt aus dem
+      // Schwarm gemorpht.
+      if (env.zonen) {
+        for (const z of env.zonen) {
+          const nx = hx < z.x0 ? z.x0 : hx > z.x1 ? z.x1 : hx;
+          const ny = hy < z.y0 ? z.y0 : hy > z.y1 ? z.y1 : hy;
+          const dx = nx - hx, dy = ny - hy;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < 1e-4 || d > z.reich) continue;
+          const f = 1 - d / z.reich;
+          const g = f * f * (3 - 2 * f) * z.staerke;
+          tx += (dx / d) * z.zug * g;
+          ty += (dy / d) * z.zug * g;
+          shrink *= 1 - z.schrumpf * g;
+        }
+      }
+
       if (warpCursor) {
         const dx = hx - cur.wx, dy = hy - cur.wy;
         const d2 = dx * dx + dy * dy;

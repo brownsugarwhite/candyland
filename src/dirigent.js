@@ -831,7 +831,7 @@ export function createDirigent(store, kamera) {
       return false;
     }
     if (e.key === 'Escape') {
-      if (verdichtung.aufloesen()) return true;
+      if (verdichtung.aufloesen(tNow)) return true;
       if (rex3d.isOpen) { rex3d.close(); return true; }
       if (karte.isOpen) { karte.close(); return true; }
       if (brainIds.length > 0) { dissolveBrain(); return true; }
@@ -970,6 +970,7 @@ export function createDirigent(store, kamera) {
       const list = [logo.anchor(), rex3d.anchor()].filter(Boolean);
       return list.length > 0 ? list : null;
     },
+    get zonen() { return verdichtung.zonen(tNow); },
     get veil() {
       if (karte.rect) return karte.rect;
       if (brainRect) return brainRect;

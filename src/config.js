@@ -227,9 +227,13 @@ export const CONFIG = {
     welleKick: 2.2,       //   mit schneller Justier-Welle; saug = Zusatz-
   },                      //   Sog während des Flugs
 
-  verdichtung: {          // Kernfunktion: Fläche verdichtet sich auf 1×1 px
-    maxAgenten: 45000,    // Budget — größere Flächen vergröbern den Pitch
-    fliessSec: 0.9,       // Sanduhr-Fluss: außen → innen
+  verdichtung: {          // Kernfunktion: Fläche verdichtet sich auf 1×1 px,
+    maxAgenten: 45000,    // von der MITTE nach außen; der Sog zieht den
+    fliessSec: 0.9,       // ganzen Schwarm kreisförmig ans Feld heran
+    marge: 1.3,           // Zellen um das Rechteck, die mit-rekrutiert werden
+    zug: 0.55,            // wie weit die übrigen Agenten nachrücken (Zellen)
+    schrumpf: 0.35,       // organisches Kleinerwerden zum Feld hin
+    reich: 11,            // Reichweite des Sogs (Zellen)
   },
 
   malen: {                // Paint (Referenz 05) — Offsets in Zellen vom Rahmen
