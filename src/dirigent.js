@@ -888,6 +888,7 @@ export function createDirigent(store, kamera) {
     reiseUpdate(t);
     linseUpdate(t, dt);
     rex3d.update(t, dt);
+    verdichtung.update(t);
     verdichtung.vorschau();
 
     if (thinkIds.length > 0) {

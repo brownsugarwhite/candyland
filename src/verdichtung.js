@@ -11,7 +11,7 @@
 // beim Auflösen exakt an ihre Plätze zurück (homeX/homeY tabu).
 // Test-UI: ctrl + linke Maustaste zieht das Rechteck; Esc löst auf.
 import { CONFIG } from './config.js';
-import { STATE, wakeAgent, allocReserve, SQUARE } from './swarm.js';
+import { STATE, wakeAgent, allocReserve, setAgentShape, SQUARE } from './swarm.js';
 
 export function createVerdichtung(store, deps) {
   const { kamera, registerTask, revert, dissolveIds } = deps;
@@ -20,6 +20,12 @@ export function createVerdichtung(store, deps) {
   let carriers = [];   // rekrutierte Gitteragenten
   let zone = null;     // Sog-Feld { x0..y1, born, ende } für den Schwarm
   let taskId = 0;
+  // Die KETTENREAKTION als laufender Plan: jeder Schritt wird erst
+  // ausgeführt, wenn die Welle den Agenten erreicht — bis dahin bleibt
+  // er ein ganz normaler Teil des Schwarms
+  let plan = [];       // { t, id|-1, sx, sy, wx, wy } sortiert nach t
+  let planIdx = 0;
+  let pixelGroesse = 0;
 
   const norm = (d) => ({
     x0: Math.min(d.x0, d.x1), x1: Math.max(d.x0, d.x1),
@@ -48,35 +54,11 @@ export function createVerdichtung(store, deps) {
     return true;
   }
 
-  // Einfluss aus dem Schwarm: Startposition außerhalb des Rechtecks,
-  // radial hinter dem Ziel (vom Zentrum aus gesehen) — die Agenten
-  // strömen aus dem umliegenden Schwarm kreisförmig herein
-  function randStart(r, wx, wy) {
-    const cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2;
-    let dx = wx - cx, dy = wy - cy;
-    const len = Math.hypot(dx, dy);
-    if (len < 1e-3) {
-      const a = Math.random() * Math.PI * 2;
-      dx = Math.cos(a); dy = Math.sin(a);
-    } else {
-      dx /= len; dy /= len;
-    }
-    const hw = Math.max(1e-3, (r.x1 - r.x0) / 2);
-    const hh = Math.max(1e-3, (r.y1 - r.y0) / 2);
-    const s = Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh, 1e-4);
-    const aus = 0.4 + Math.random() * 2.4;
-    const jit = (Math.random() - 0.5) * 1.1;
-    return [
-      cx + dx / s + dx * aus - dy * jit,
-      cy + dy / s + dy * aus + dx * jit,
-    ];
-  }
 
   function starte(r, tNow) {
-    aufloesen();
+    aufloesen(tNow);
     if (!taskId) taskId = registerTask('verdichtung: fläche', true);
     const V = CONFIG.verdichtung;
-    const AG = store.baseTint;
     // 1×1 px ohne Zwischenräume — unabhängig von der Zoomstufe; bei
     // riesigen Flächen wächst der Pitch, bis das Budget reicht
     let pitch = 1 / kamera.scale;
@@ -87,79 +69,122 @@ export function createVerdichtung(store, deps) {
       cols = Math.max(2, Math.round((r.x1 - r.x0) / pitch));
       rows = Math.max(2, Math.round((r.y1 - r.y0) / pitch));
     }
-    const size = pitch * 1.55; // Überlappung — sonst frisst AA die Deckung
+    pixelGroesse = pitch * 1.55; // Überlappung — sonst frisst AA die Deckung
 
     // das Sog-Feld: der ganze Schwarm rückt kreisförmig näher
     zone = { ...r, born: tNow, ende: 0 };
 
-    // Gitteragenten in und UM die Fläche machen mit — jeder übernimmt
-    // das Pixel, das seinem Platz am nächsten liegt (kurze, organische
-    // Wege; die Lücke drumherum schließt der Sog)
-    const marge = V.marge;
-    const belegt = new Set();
+    // DIE KETTENREAKTION planen — ausgeführt wird sie Schritt für
+    // Schritt in update(), wenn die Welle den jeweiligen Agenten
+    // erreicht. Pixel füllen sich von der MITTE nach außen; die
+    // Agenten dafür kommen von INNEN nach außen aus dem Schwarm: erst
+    // kontrahieren die Kacheln unterm Rechteck zur Mitte, dann zieht
+    // es — Ring um Ring — die umliegenden nach (jeder Schritt reißt
+    // über die Gitterkräfte den nächsten mit), bis die Fläche voll
+    // ist. Reicht der Schwarm im Sog-Radius nicht, strömt Nachschub
+    // von JENSEITS der Front nach — derselbe Fluss, weiter außen.
+    const cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2;
+    const pixel = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const wx = r.x0 + (col + 0.5) * pitch;
+        const wy = r.y0 + (row + 0.5) * pitch;
+        pixel.push({ wx, wy, d: Math.hypot(wx - cx, wy - cy) });
+      }
+    }
+    pixel.sort((a, b) => a.d - b.d); // Fläche wächst aus der Mitte
+
+    // Rekrutiert werden NUR die Kacheln im Rechteck plus eine schmale
+    // Marge — der restliche Schwarm bleibt bestehen und rückt über den
+    // Sog nach (er wird gezogen, aber nicht absorbiert)
+    const marge = V.kettenMarge;
+    const traeger = [];
     for (const i of store.carrierList) {
       if (store.active[i] === 0 || store.state[i] > STATE.RETURNING) continue;
       const hx = store.homeX[i], hy = store.homeY[i];
       if (hx < r.x0 - marge || hx > r.x1 + marge ||
           hy < r.y0 - marge || hy > r.y1 + marge) continue;
-      let col = Math.max(0, Math.min(cols - 1, Math.floor((hx - r.x0) / pitch)));
-      let row = Math.max(0, Math.min(rows - 1, Math.floor((hy - r.y0) / pitch)));
-      let idx = row * cols + col;
-      while (belegt.has(idx)) idx = (idx + 1) % (cols * rows); // frei suchen
-      belegt.add(idx);
-      carriers.push({ id: i, idx });
+      traeger.push({ i, d: Math.hypot(hx - cx, hy - cy) });
     }
+    traeger.sort((a, b) => a.d - b.d); // die Nächsten kondensieren zuerst
 
-    const cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2;
-    const maxD = Math.hypot((r.x1 - r.x0) / 2, (r.y1 - r.y0) / 2) || 1e-3;
-    const ziel = (idx) => {
-      const col = idx % cols, row = (idx / cols) | 0;
-      const wx = r.x0 + (col + 0.5) * pitch;
-      const wy = r.y0 + (row + 0.5) * pitch;
-      // die Fläche formt sich von der MITTE nach außen
-      const delay = (Math.hypot(wx - cx, wy - cy) / maxD) * V.fliessSec +
-        Math.random() * 0.05;
-      return { wx, wy, delay };
-    };
-
-    // Die Kacheln unter dem Rechteck sind der ANFANG der Animation:
-    // sie skalieren SOFORT auf 1px und rücken auf ihr Pixel — kein
-    // Warten, kein Dimmen, kein Verschwinden
-    for (const c of carriers) {
-      const z = ziel(c.idx);
-      store.state[c.id] = STATE.IMAGE;
-      store.taskId[c.id] = taskId;
-      store.frozen[c.id] = 0;
-      store.targetX[c.id] = z.wx; // home bleibt unangetastet!
-      store.targetY[c.id] = z.wy;
-      store.sizeTgt[c.id] = size;
-      store.activateAt[c.id] = tNow;
+    // ALLE Schritte takten sich am Wachstum der Fläche (Mitte → außen,
+    // wachsSpeed Zellen/s) — sie füllt sich Ring für Ring; Nachschub
+    // strömt dicht über die nächstgelegene Rechteck-Kante ein
+    const hw = Math.max(1e-3, (r.x1 - r.x0) / 2);
+    const hh = Math.max(1e-3, (r.y1 - r.y0) / 2);
+    plan = [];
+    planIdx = 0;
+    for (let k = 0; k < pixel.length; k++) {
+      const p = pixel[k];
+      const t = tNow + p.d / V.wachsSpeed + Math.random() * 0.06;
+      if (k < traeger.length) {
+        plan.push({ t, id: traeger[k].i, wx: p.wx, wy: p.wy });
+      } else {
+        let dx = p.wx - cx, dy = p.wy - cy;
+        const len = Math.hypot(dx, dy);
+        if (len < 1e-3) {
+          const a = Math.random() * Math.PI * 2;
+          dx = Math.cos(a); dy = Math.sin(a);
+        } else { dx /= len; dy /= len; }
+        // Randpunkt des Rechtecks in Zielrichtung + kurz dahinter
+        const s = Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh, 1e-4);
+        const aus = 0.3 + Math.random() * 1.8;
+        plan.push({
+          t, id: -1, wx: p.wx, wy: p.wy,
+          sx: cx + dx / s + dx * aus + (Math.random() - 0.5) * 0.7,
+          sy: cy + dy / s + dy * aus + (Math.random() - 0.5) * 0.7,
+        });
+      }
     }
-    // … erst danach breitet sich die Verdichtung aus: die restlichen
-    // Pixel füllen sich von der Mitte nach außen aus dem Schwarm
-    for (let idx = 0; idx < cols * rows; idx++) {
-      if (belegt.has(idx)) continue;
-      const id = allocReserve(store, cx, cy);
-      if (id < 0) break;
-      const z = ziel(idx);
-      const [sx, sy] = randStart(r, z.wx, z.wy);
-      wakeAgent(store, id, tNow, V.startPause + z.delay, {
-        size: 0.02, shape: SQUARE, taskId, swirl: true, px: sx, py: sy,
-      });
-      store.state[id] = STATE.IMAGE; // friert nach Ankunft ein
-      store.targetX[id] = z.wx;
-      store.targetY[id] = z.wy;
-      store.sizeTgt[id] = size;
-      store.tgtR[id] = AG[0];
-      store.tgtG[id] = AG[1];
-      store.tgtB[id] = AG[2];
-      ids.push(id);
+    plan.sort((a, b) => a.t - b.t);
+  }
+
+  // Die Kettenreaktion läuft: pro Frame werden genau die Schritte
+  // ausgeführt, deren Welle jetzt ankommt — bis dahin bleibt jeder
+  // Agent ein normaler Teil des Schwarms (kein Dimmen, kein Warten)
+  function update(tNow) {
+    if (planIdx >= plan.length) return;
+    const AG = store.baseTint;
+    let n = 0;
+    while (planIdx < plan.length && plan[planIdx].t <= tNow && n < 600) {
+      const p = plan[planIdx++];
+      n++;
+      if (p.id >= 0) {
+        if (store.active[p.id] === 0 || store.state[p.id] > STATE.RETURNING) continue;
+        const id = p.id;
+        store.state[id] = STATE.IMAGE; // friert nach Ankunft ein
+        store.taskId[id] = taskId;
+        store.frozen[id] = 0;
+        store.targetX[id] = p.wx; // home bleibt unangetastet!
+        store.targetY[id] = p.wy;
+        store.sizeTgt[id] = pixelGroesse;
+        store.activateAt[id] = tNow;
+        setAgentShape(store, id, SQUARE); // Abstand weg → quadratisch
+        carriers.push({ id });
+      } else {
+        const id = allocReserve(store, p.sx, p.sy);
+        if (id < 0) continue;
+        wakeAgent(store, id, tNow, 0, {
+          size: 0.02, shape: SQUARE, taskId, swirl: true, px: p.sx, py: p.sy,
+        });
+        store.state[id] = STATE.IMAGE;
+        store.targetX[id] = p.wx;
+        store.targetY[id] = p.wy;
+        store.sizeTgt[id] = pixelGroesse;
+        store.tgtR[id] = AG[0];
+        store.tgtG[id] = AG[1];
+        store.tgtB[id] = AG[2];
+        ids.push(id);
+      }
     }
     store.needsRebuild = true;
   }
 
   function aufloesen(tNow = 0) {
-    if (ids.length === 0 && carriers.length === 0) return false;
+    if (ids.length === 0 && carriers.length === 0 && plan.length === 0) return false;
+    plan = [];
+    planIdx = 0;
     dissolveIds(ids);
     for (const c of carriers) revert(c.id);
     ids = [];
@@ -199,8 +224,8 @@ export function createVerdichtung(store, deps) {
   }
 
   return {
-    down, move, up, aufloesen, vorschau, zonen,
+    down, move, up, aufloesen, vorschau, zonen, update,
     get isDragging() { return drag !== null; },
-    get aktiv() { return ids.length > 0 || carriers.length > 0; },
+    get aktiv() { return ids.length > 0 || carriers.length > 0 || plan.length > 0; },
   };
 }

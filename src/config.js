@@ -227,15 +227,13 @@ export const CONFIG = {
     welleKick: 2.2,       //   mit schneller Justier-Welle; saug = Zusatz-
   },                      //   Sog während des Flugs
 
-  verdichtung: {          // Kernfunktion: Fläche verdichtet sich auf 1×1 px,
-    maxAgenten: 45000,    // von der MITTE nach außen; der Sog zieht den
-    fliessSec: 0.9,       // ganzen Schwarm kreisförmig ans Feld heran
-    startPause: 0.25,     // erst schrumpfen die Kacheln darunter auf 1px,
-                          //   dann fließt der Rest ein
-    marge: 1.3,           // Zellen um das Rechteck, die mit-rekrutiert werden
-    zug: 0.55,            // wie weit die übrigen Agenten nachrücken (Zellen)
-    schrumpf: 0.35,       // organisches Kleinerwerden zum Feld hin
-    reich: 11,            // Reichweite des Sogs (Zellen)
+  verdichtung: {          // Kernfunktion: Fläche verdichtet sich auf 1×1 px
+    maxAgenten: 45000,    // als KETTENREAKTION — die Kacheln darunter
+    wachsSpeed: 2.6,      // kontrahieren zur Mitte, dann zieht es Ring um
+    kettenMarge: 0.8,     // Ring die Umgebung (kettenMarge Zellen) nach;
+    zug: 0.55,            // die Fläche wächst mit wachsSpeed (Zellen/s)
+    schrumpf: 0.35,       // von der Mitte nach außen; der Sog rückt den
+    reich: 11,            // ganzen Schwarm heran (zug/schrumpf/reich)
   },
 
   malen: {                // Paint (Referenz 05) — Offsets in Zellen vom Rahmen
