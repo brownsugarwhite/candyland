@@ -152,6 +152,7 @@ export function createVerdichtung(store, deps) {
     const zeiger = new Int32Array(SEK);
     plan = [];
     planIdx = 0;
+    let frontR = 0; // wie weit die Welle echtes Gitter konsumiert
     for (let k = 0; k < pixel.length; k++) {
       const p = pixel[k];
       const s0 = sektor(p.wx, p.wy);
@@ -161,13 +162,21 @@ export function createVerdichtung(store, deps) {
         if (zeiger[s] < quellen[s].length) { q = quellen[s][zeiger[s]++]; break; }
       }
       if (!q) break;
+      if (q.id >= 0 && q.d > frontR) frontR = q.d;
       plan.push({
         t: tNow + q.d / V.kettenSpeed + Math.random() * 0.12,
         id: q.id, wx: p.wx, wy: p.wy, sx: q.x, sy: q.y,
       });
     }
     plan.sort((a, b) => a.t - b.t);
-    flaeche = (r.x1 - r.x0) * (r.y1 - r.y0); // Welt-Fläche für den Sog
+    // Fließband-Abschluss: das restliche Gitter (auch offcanvas) rückt
+    // um die geräumte Strecke nach und legt sich um die Fläche
+    const halbDiag = Math.hypot((r.x1 - r.x0) / 2, (r.y1 - r.y0) / 2);
+    zone.cx = cx;
+    zone.cy = cy;
+    zone.frontR = frontR;
+    zone.pullIn = Math.max(0, frontR - (halbDiag + 0.6));
+    flaeche = (r.x1 - r.x0) * (r.y1 - r.y0);
   }
 
   // Die Kettenreaktion läuft: pro Frame werden genau die Schritte
@@ -242,13 +251,14 @@ export function createVerdichtung(store, deps) {
       if (t > zone.ende + 0.75) { zone = null; return null; }
     }
     if (staerke <= 0.001) return null;
-    // A wächst mit dem Füllstand — die Strömung schwillt an, während
-    // die Fläche kondensiert (Senke: u = A/(2πd) in swarm.postStep)
+    // der Nachrück-Zug wächst mit dem Füllstand: während die Welle
+    // konsumiert, folgt das restliche Gitter kontinuierlich nach
     const fill = plan.length > 0 ? planIdx / plan.length : 1;
     return [{
-      x0: zone.x0, y0: zone.y0, x1: zone.x1, y1: zone.y1,
-      staerke, A: flaeche * fill * V.sogFaktor,
-      uMax: V.uMax, schrumpf: V.schrumpf,
+      cx: zone.cx, cy: zone.cy,
+      frontR: zone.frontR || 0,
+      pullIn: (zone.pullIn || 0) * fill,
+      spanne: V.spanne, staerke, schrumpf: V.schrumpf,
     }];
   }
 

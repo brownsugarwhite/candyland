@@ -361,24 +361,24 @@ export function postStep(store, tSim, dtFrame, env) {
       // seine Ruhelage, die Trichter-Projektion (renderformat) zieht es
       // rein visuell in die Tiefe — echtes 3D statt Verdrängung.
 
-      // VERDICHTUNG als SENKEN-STRÖMUNG: die kondensierende Fläche
-      // saugt das gesamte Feld inkompressibel an — Verschiebung
-      // u = A/(2πd), A = bereits verdichtete Fläche. JEDER Agent rückt
-      // wie an einem Netz nach, nah stark, fern sanft — es entstehen
-      // nie Lücken, der ganze Schwarm ist in Bewegung und wird zum
-      // Feld hin organisch kleiner.
+      // VERDICHTUNG, Fließband-Abschluss: die NICHT konsumierten
+      // Gitteragenten (auch jenseits des Bildrands) rücken permanent
+      // nach — an der Konsum-Front um die volle geräumte Strecke
+      // (pullIn = Front − Flächenrand), nach außen abklingend. Am Ende
+      // steht das nachgerückte Gitter dicht um die entstandene Fläche
+      // und wird zu ihr hin kleiner; beim Auflösen federt alles zurück.
       if (env.zonen) {
         for (const z of env.zonen) {
-          const nx = hx < z.x0 ? z.x0 : hx > z.x1 ? z.x1 : hx;
-          const ny = hy < z.y0 ? z.y0 : hy > z.y1 ? z.y1 : hy;
-          const dx = nx - hx, dy = ny - hy;
+          if (z.pullIn <= 0) continue;
+          const dx = z.cx - hx, dy = z.cy - hy;
           const d = Math.sqrt(dx * dx + dy * dy);
           if (d < 1e-4) continue;
-          const u = Math.min(z.uMax, z.A / (6.2832 * d)) * z.staerke;
-          if (u < 0.003) continue;
+          const u = z.pullIn * z.staerke *
+            Math.exp(-Math.max(0, d - z.frontR) / z.spanne);
+          if (u < 0.004) continue;
           tx += (dx / d) * u;
           ty += (dy / d) * u;
-          const g = Math.min(1, u / 1.2);
+          const g = Math.min(1, u / Math.max(0.5, z.pullIn));
           shrink *= 1 - z.schrumpf * g;
         }
       }
