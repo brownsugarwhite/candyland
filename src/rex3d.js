@@ -259,12 +259,20 @@ export function createRex3d(store, deps) {
     const halbePlatte = spanX / 2;
     const hoehe = (v) => glatt((v[2] - minZ) / spanZ); // 0 Platte … 1 Kopf
 
-    // je Polyline: Endknoten (Level-2), Kopf-Faktor, Stagger-Delay
+    // je Polyline: Endknoten (Level-2 → Käfig-Knoten), Kopf-Faktor,
+    // Stagger-Delay. Die End-Käfigknoten verankern die Linie an den
+    // ECHTEN Agenten — so formt sich Rex aus dem Rauten-Gitter.
+    const knotOfL2 = new Map();
+    knoten.forEach((l2, k) => knotOfL2.set(l2, k));
     const polyInfo = polys.map((poly) => {
       const a = pos[poly[0]], b = pos[poly[poly.length - 1]];
       const h = Math.max(hoehe(a), hoehe(b));
       const r = Math.hypot((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) / halbePlatte;
-      return { h, delay: 1 - Math.min(1, r) }; // außen zuerst, innen später
+      return {
+        h, delay: 1 - Math.min(1, r), // außen zuerst, innen später
+        kA: knotOfL2.get(poly[0]),
+        kB: knotOfL2.get(poly[poly.length - 1]),
+      };
     });
 
     // Knoten: nur die PLATTE bekommt Agenten; radiale Lage fürs
@@ -430,6 +438,32 @@ export function createRex3d(store, deps) {
     const pos = geo.pos;
     const K = store.kapseln;
     const WEISS = [0.93, 0.95, 0.94];
+    const alphaF = glatt((t - 0.05) / 0.6); // Linien blenden weich auf
+
+    // 1) KNOTEN zuerst: Ziele setzen + aktuelle Abweichung der Agenten
+    // merken — die Linien hängen an den ECHTEN Agentenpositionen. Beim
+    // Start sitzen die Agenten noch auf ihren Gitterplätzen → die
+    // Linien SIND das rautenförmige Hintergrundgitter und wandern/
+    // krümmen sich mit den Agenten zu Rex.
+    if (!geo.offX) {
+      geo.offX = new Float32Array(geo.knoten.length);
+      geo.offY = new Float32Array(geo.knoten.length);
+    }
+    geo.offX.fill(0);
+    geo.offY.fill(0);
+    for (const kn of knotIds) {
+      const v = pos[geo.knoten[kn.k]];
+      welt(v, s, e, sinY, cosY, W1);
+      store.homeX[kn.id] = W1.x;
+      store.homeY[kn.id] = W1.y;
+      store.targetX[kn.id] = W1.x;
+      store.targetY[kn.id] = W1.y;
+      store.zPos[kn.id] = W1.z;
+      const r = geo.knotInfo[kn.k].r;
+      store.sizeTgt[kn.id] = R.skalAussen * glatt((r - 0.3) / 0.6);
+      geo.offX[kn.k] = store.posX[kn.id] - W1.x;
+      geo.offY[kn.k] = store.posY[kn.id] - W1.y;
+    }
 
     for (let p = 0; p < geo.polys.length; p++) {
       const poly = geo.polys[p];
@@ -437,9 +471,19 @@ export function createRex3d(store, deps) {
       // Morph gerade → gekrümmt, gestaffelt von außen nach innen
       const m = glatt((t - 0.35 - info.delay * R.morphSec * 0.5) / R.morphSec);
       const bri = R.briPlatte + (R.briKoerper - R.briPlatte) * info.h;
-      const alpha = 0.68 + 0.3 * info.h;
+      // Körper-Linien tauchen erst mit dem Morph auf — am Anfang
+      // existiert NUR das Rauten-Gitter der Platte
+      let alpha = (0.68 + 0.3 * info.h) * alphaF;
+      if (info.h > 0.2) alpha *= 0.1 + 0.9 * m;
+      if (alpha < 0.01) continue;
       const dicke = dickeBasis + (dickeKopf - dickeBasis) * info.h * dickeF;
       const A = pos[poly[0]], B = pos[poly[poly.length - 1]];
+      // Abweichung der End-AGENTEN von ihren Käfig-Zielen: die Linie
+      // hängt an den echten Agenten (Start = Rauten-Gitterplätze)
+      const oAx = info.kA !== undefined ? geo.offX[info.kA] : 0;
+      const oAy = info.kA !== undefined ? geo.offY[info.kA] : 0;
+      const oBx = info.kB !== undefined ? geo.offX[info.kB] : 0;
+      const oBy = info.kB !== undefined ? geo.offY[info.kB] : 0;
       let habe = false;
       for (let k = 0; k < poly.length; k++) {
         const v = pos[poly[k]];
@@ -449,6 +493,8 @@ export function createRex3d(store, deps) {
         const my = (A[1] + (B[1] - A[1]) * f) * (1 - m) + v[1] * m;
         const mz = (A[2] + (B[2] - A[2]) * f) * (1 - m) + v[2] * m;
         welt([mx, my, mz + atme * info.h], s, e, sinY, cosY, W2);
+        W2.x += oAx * (1 - f) + oBx * f;
+        W2.y += oAy * (1 - f) + oBy * f;
         project3d(P, kamera, W2.x, W2.y, W2.z, PR2);
         if (habe && !PR.hidden && !PR2.hidden) {
           const kM = (PR.k + PR2.k) / 2;
@@ -474,18 +520,6 @@ export function createRex3d(store, deps) {
         dickeBasis * (PR.k + PR2.k) / 2);
     }
 
-    // Platten-Knoten: außen ~0.5 der Kachelgröße, innen → 0
-    for (const kn of knotIds) {
-      const v = pos[geo.knoten[kn.k]];
-      welt(v, s, e, sinY, cosY, W1);
-      store.homeX[kn.id] = W1.x;
-      store.homeY[kn.id] = W1.y;
-      store.targetX[kn.id] = W1.x;
-      store.targetY[kn.id] = W1.y;
-      store.zPos[kn.id] = W1.z;
-      const r = geo.knotInfo[kn.k].r;
-      store.sizeTgt[kn.id] = R.skalAussen * glatt((r - 0.3) / 0.6);
-    }
   }
 
   // sanfter Anker-Warp: das umliegende Gitter weicht Rex organisch aus
