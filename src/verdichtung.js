@@ -114,8 +114,9 @@ export function createVerdichtung(store, deps) {
       let a = Math.atan2(y - cy, x - cx) / (Math.PI * 2) + 0.5;
       return Math.min(SEK - 1, Math.floor(a * SEK));
     };
-    // Konsumiert wird NUR Rechteck + Übergangszone (bandPx) — alles
-    // dahinter bleibt normales Raster und rückt nur elastisch nach
+    // Quellen: das ganze Lattice, streng nach Distanz — die Welle
+    // konsumiert Ring für Ring, niemand überfliegt Stehende. Was nicht
+    // gebraucht wird, bleibt Raster und rückt elastisch nach.
     rekt = { ...r };
     band = Math.max(0.8, V.bandPx / kamera.scale);
     const quellen = Array.from({ length: SEK }, () => []);
@@ -123,9 +124,6 @@ export function createVerdichtung(store, deps) {
     for (const i of store.carrierList) {
       if (store.active[i] === 0 || store.state[i] > STATE.RETURNING) continue;
       const hx = store.homeX[i], hy = store.homeY[i];
-      const ddx = hx < r.x0 ? r.x0 - hx : hx > r.x1 ? hx - r.x1 : 0;
-      const ddy = hy < r.y0 ? r.y0 - hy : hy > r.y1 ? hy - r.y1 : 0;
-      if (Math.hypot(ddx, ddy) > band) continue;
       quellen[sektor(hx, hy)].push({
         id: i, d: Math.hypot(hx - cx, hy - cy), x: hx, y: hy,
       });
@@ -140,20 +138,22 @@ export function createVerdichtung(store, deps) {
       [kx - hwV, ky + hhV], [kx + hwV, ky + hhV]]) {
       sichtR = Math.max(sichtR, Math.hypot(ex - cx, ey - cy));
     }
+    // Nachschub jenseits des Lattice in ECHTER RASTERDICHTE — die
+    // Nachrückenden bewegen sich im Gitterverbund, dadurch kann der
+    // Strom das Bild nie fluten
     let ringR = sichtR + 0.8;
-    while (nQuellen < pixel.length) {
-      const n = Math.max(8, Math.round((ringR * 6.2832) / 0.4));
-      for (let k = 0; k < n && nQuellen < pixel.length * 1.02; k++) {
-        // kräftiger Jitter — der Strom soll organisch wirken, nicht
-        // als konzentrische Ringe
+    const bedarf = pixel.length + 600; // + Auffüllung der geräumten Plätze
+    while (nQuellen < bedarf) {
+      const n = Math.max(8, Math.round((ringR * 6.2832) / 1.4));
+      for (let k = 0; k < n && nQuellen < bedarf; k++) {
         const a = ((k + Math.random()) / n) * Math.PI * 2;
-        const rr = ringR + Math.random() * 0.9;
+        const rr = ringR + Math.random() * 1.2;
         const x = cx + Math.cos(a) * rr;
         const y = cy + Math.sin(a) * rr;
         quellen[sektor(x, y)].push({ id: -1, d: rr, x, y });
         nQuellen++;
       }
-      ringR += 0.45;
+      ringR += 1.35;
     }
     for (const q of quellen) q.sort((a, b) => a.d - b.d);
 
@@ -164,19 +164,40 @@ export function createVerdichtung(store, deps) {
     plan = [];
     planIdx = 0;
     let frontR = 0; // wie weit die Welle echtes Gitter konsumiert
-    for (let k = 0; k < pixel.length; k++) {
-      const p = pixel[k];
-      const s0 = sektor(p.wx, p.wy);
-      let q = null;
+    const geraeumt = []; // konsumierte Gitterplätze im Sichtfeld
+    const nimmQuelle = (x, y) => {
+      const s0 = sektor(x, y);
       for (let off = 0; off < SEK; off++) {
         const s = (s0 + (off % 2 === 0 ? off / 2 : -(off + 1) / 2) + SEK) % SEK;
-        if (zeiger[s] < quellen[s].length) { q = quellen[s][zeiger[s]++]; break; }
+        if (zeiger[s] < quellen[s].length) return quellen[s][zeiger[s]++];
       }
+      return null;
+    };
+    for (let k = 0; k < pixel.length; k++) {
+      const p = pixel[k];
+      const q = nimmQuelle(p.wx, p.wy);
       if (!q) break;
-      if (q.id >= 0 && q.d > frontR) frontR = q.d;
+      if (q.id >= 0) {
+        if (q.d > frontR) frontR = q.d;
+        const ddx = q.x < r.x0 ? r.x0 - q.x : q.x > r.x1 ? q.x - r.x1 : 0;
+        const ddy = q.y < r.y0 ? r.y0 - q.y : q.y > r.y1 ? q.y - r.y1 : 0;
+        if (Math.hypot(ddx, ddy) > band && q.d < sichtR) geraeumt.push(q);
+      }
       plan.push({
         t: tNow + q.d / V.kettenSpeed + Math.random() * 0.12,
         id: q.id, wx: p.wx, wy: p.wy, sx: q.x, sy: q.y,
+      });
+    }
+    // DAS FLIESSBAND LÄUFT WEITER: die geräumten Gitterplätze im
+    // Sichtfeld werden von noch weiter außen wieder besetzt — am Ende
+    // steht das Raster komplett, nur die Übergangszone zeigt den
+    // Gradienten zur Fläche
+    for (const g of geraeumt) {
+      const q = nimmQuelle(g.x, g.y);
+      if (!q) break;
+      plan.push({
+        t: tNow + q.d / V.kettenSpeed + Math.random() * 0.12,
+        id: q.id, wx: g.x, wy: g.y, sx: q.x, sy: q.y, raster: true,
       });
     }
     plan.sort((a, b) => a.t - b.t);
@@ -210,22 +231,24 @@ export function createVerdichtung(store, deps) {
         store.targetX[id] = p.wx; // home bleibt unangetastet!
         store.targetY[id] = p.wy;
         store.activateAt[id] = tNow;
-        setAgentShape(store, id, SQUARE); // Abstand weg → quadratisch
+        // Flächen-Pixel werden quadratisch; Raster-Auffüller bleiben
+        // Squircle-Kacheln des Schwarms
+        if (!p.raster) setAgentShape(store, id, SQUARE);
         carriers.push({ id });
-        fliegend.push({ id, norm: Math.max(0.4, store.size[id]) });
+        if (!p.raster) fliegend.push({ id, norm: Math.max(0.4, store.size[id]) });
       } else {
         const id = allocReserve(store, p.sx, p.sy);
         if (id < 0) continue;
-        // Massen-Nachschub reist dichte-gekoppelt an (sonst flutet er
-        // das Bild): sichtbar, aber klein — geschrumpft auf 1 px wird
-        // NACH ORT erst in der Übergangszone (s. unten)
-        const norm = Math.min(0.5, pixelGroesse * 4);
+        // Nachschub = das Gitter von weiter draußen: volle Kachelgröße
+        // und Rasterabstand; geschrumpft wird NACH ORT erst in der
+        // Übergangszone (s. unten)
+        const norm = 0.82;
         wakeAgent(store, id, tNow, 0, {
           size: norm, shape: store.globalShape, taskId, swirl: true,
           px: p.sx, py: p.sy,
         });
-        store.size[id] = norm * (0.7 + Math.random() * 0.3);
-        setAgentShape(store, id, SQUARE);
+        store.size[id] = norm * (0.8 + Math.random() * 0.2);
+        if (!p.raster) setAgentShape(store, id, SQUARE);
         store.state[id] = STATE.IMAGE;
         store.targetX[id] = p.wx;
         store.targetY[id] = p.wy;
@@ -233,7 +256,7 @@ export function createVerdichtung(store, deps) {
         store.tgtG[id] = AG[1];
         store.tgtB[id] = AG[2];
         ids.push(id);
-        fliegend.push({ id, norm });
+        if (!p.raster) fliegend.push({ id, norm });
       }
     }
     store.needsRebuild = true;

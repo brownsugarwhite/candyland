@@ -228,11 +228,11 @@ export const CONFIG = {
   },                      //   Sog während des Flugs
 
   verdichtung: {          // Kernfunktion: Fläche verdichtet sich auf 1×1 px.
-    maxAgenten: 45000,    // Konsumiert wird Rechteck + Übergangszone
-    bandPx: 50,           // (bandPx): dort — und NUR dort — schrumpfen die
-    kettenSpeed: 18,      // einwandernden Agenten ortsabhängig auf 1 px;
-    schrumpf: 0.4,        // dahinter bleibt das normale Raster und rückt
-  },                      //   nur elastisch nach (Welle: kettenSpeed)
+    maxAgenten: 12000,    // Die Welle konsumiert das Lattice Ring für Ring;
+    bandPx: 50,           // Nachschub kommt in RASTERDICHTE und voller
+    kettenSpeed: 26,      // Größe von jenseits — geschrumpft wird nur in
+    schrumpf: 0.4,        // der Übergangszone (bandPx) vor dem Rechteck;
+  },                      //   maxAgenten begrenzt die Auflösung zeitlich
 
   malen: {                // Paint (Referenz 05) — Offsets in Zellen vom Rahmen
     canvas: { dx: 2.3, dy: 2.5, w: 5.6, h: 3.5 }, // weiße Fläche (1px-Agenten)
