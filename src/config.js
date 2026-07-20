@@ -228,12 +228,11 @@ export const CONFIG = {
   },                      //   Sog während des Flugs
 
   verdichtung: {          // Kernfunktion: Fläche verdichtet sich auf 1×1 px
-    maxAgenten: 45000,    // als Kettenreaktion durch das GANZE Netz:
-    kettenSpeed: 22,      // die Welle läuft mit kettenSpeed (Zellen/s)
-    fangWeite: 2.2,       // nach außen; Umgebung bis fangWeite wird Teil
-    sogFaktor: 0.75,      // der Fläche, Nachschub wandert von JENSEITS
-    uMax: 2.8,            // des Sichtfensters ein; Senke u = A·f/(2πd)
-    schrumpf: 0.4,        // zieht jeden Agenten lückenlos nach
+    maxAgenten: 45000,    // als Kettenreaktion durch das GANZE Mesh: die
+    kettenSpeed: 18,      // Welle (Zellen/s) konsumiert die Gitteragenten
+    sogFaktor: 0.75,      // Ring für Ring nach außen — auch jenseits des
+    uMax: 4,              // Bildrands; die Senke u = A·f/(2πd) lässt alle
+    schrumpf: 0.4,        // Verbleibenden lückenlos nachrücken
   },
 
   malen: {                // Paint (Referenz 05) — Offsets in Zellen vom Rahmen

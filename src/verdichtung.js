@@ -95,13 +95,16 @@ export function createVerdichtung(store, deps) {
     }
     pixel.sort((a, b) => a.d - b.d); // Fläche wächst aus der Mitte
 
-    // Das ganze Netz ist EINE Quelle: absorbiert wird die nahe
-    // Umgebung (bis fangWeite); weiterer Nachschub entsteht NUR
-    // außerhalb des Sichtfensters und wandert sichtbar von außen ein —
-    // nichts erscheint im Bild aus dem Nichts. Zuordnung über
-    // WINKEL-SEKTOREN: jedes Pixel bekommt eine Quelle aus seiner
-    // Richtung → alle Bahnen laufen radial, niemand überfliegt
-    // jemanden, ein einziger organischer Strom.
+    // DIE KETTENREAKTION ÜBERTRÄGT SICH AUF DAS GANZE MESH: Quellen
+    // sind ALLE Gitteragenten des gesamten Lattice (das 4× größer ist
+    // als das Sichtfenster — auch von jenseits des Bildrands wird
+    // nachgezogen), sortiert nach Distanz. Die Welle konsumiert sie
+    // Ring für Ring nach außen: jeder fliegt erst los, wenn alle
+    // näheren schon unterwegs sind — niemand überfliegt Stehende.
+    // Erst wenn das echte Lattice erschöpft ist, setzen Reserve-
+    // Quellen den Strom jenseits davon fort. Zuordnung über WINKEL-
+    // SEKTOREN: jedes Pixel bekommt eine Quelle aus seiner Richtung →
+    // alle Bahnen laufen radial, ein einziger organischer Strom.
     const SEK = 48;
     const sektor = (x, y) => {
       let a = Math.atan2(y - cy, x - cx) / (Math.PI * 2) + 0.5;
@@ -112,9 +115,6 @@ export function createVerdichtung(store, deps) {
     for (const i of store.carrierList) {
       if (store.active[i] === 0 || store.state[i] > STATE.RETURNING) continue;
       const hx = store.homeX[i], hy = store.homeY[i];
-      const ddx = hx < r.x0 ? r.x0 - hx : hx > r.x1 ? hx - r.x1 : 0;
-      const ddy = hy < r.y0 ? r.y0 - hy : hy > r.y1 ? hy - r.y1 : 0;
-      if (Math.hypot(ddx, ddy) > V.fangWeite) continue;
       quellen[sektor(hx, hy)].push({
         id: i, d: Math.hypot(hx - cx, hy - cy), x: hx, y: hy,
       });
