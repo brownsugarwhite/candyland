@@ -46,15 +46,19 @@ export function createAuswahl(store, logo) {
         const tgt = id === hovered ? K.hoverGrow : 0;
         const h = store.hover[id] + (tgt - store.hover[id]) * rate;
         store.hover[id] = h;
-        // Träger-Kacheln wachsen in postStep über hover[]; gebundene
-        // Agenten (Logo/Claws, STATE.TEXT) direkt über sizeTgt
-        if (store.state[id] > STATE.RETURNING) {
+        // Träger-Kacheln wachsen in postStep über hover[]; NUR die fest
+        // verankerten Logo/Claws-Agenten direkt über sizeTgt. (Nie über
+        // state entscheiden: ein Gitteragent kann WÄHREND des Hover-
+        // Abklingens in einen Dienst wechseln — sonst würde hier seine
+        // Dienst-Größe mit einem alten Wert überschrieben.)
+        const gebunden = logo.isClaw(id) || logo.isLogo(id);
+        if (gebunden) {
           if (!baseSizes.has(id)) baseSizes.set(id, store.sizeTgt[id]);
           store.sizeTgt[id] = baseSizes.get(id) * (1 + h);
         }
         if (id !== hovered && h < 0.004) {
           store.hover[id] = 0;
-          if (store.state[id] > STATE.RETURNING && baseSizes.has(id)) {
+          if (gebunden && baseSizes.has(id)) {
             store.sizeTgt[id] = baseSizes.get(id);
           }
           baseSizes.delete(id);

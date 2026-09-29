@@ -361,28 +361,6 @@ export function postStep(store, tSim, dtFrame, env) {
       // seine Ruhelage, die Trichter-Projektion (renderformat) zieht es
       // rein visuell in die Tiefe — echtes 3D statt Verdrängung.
 
-      // VERDICHTUNG, Fließband-Abschluss: die NICHT konsumierten
-      // Gitteragenten (auch jenseits des Bildrands) rücken permanent
-      // nach — an der Konsum-Front um die volle geräumte Strecke
-      // (pullIn = Front − Flächenrand), nach außen abklingend. Am Ende
-      // steht das nachgerückte Gitter dicht um die entstandene Fläche
-      // und wird zu ihr hin kleiner; beim Auflösen federt alles zurück.
-      if (env.zonen) {
-        for (const z of env.zonen) {
-          if (z.pullIn <= 0) continue;
-          const dx = z.cx - hx, dy = z.cy - hy;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < 1e-4) continue;
-          const u = z.pullIn * z.staerke *
-            Math.exp(-Math.max(0, d - z.frontR) / z.spanne);
-          if (u < 0.004) continue;
-          tx += (dx / d) * u;
-          ty += (dy / d) * u;
-          const g = Math.min(1, u / Math.max(0.5, z.pullIn));
-          shrink *= 1 - z.schrumpf * g;
-        }
-      }
-
       if (warpCursor) {
         const dx = hx - cur.wx, dy = hy - cur.wy;
         const d2 = dx * dx + dy * dy;

@@ -16,7 +16,7 @@ import { askBrain, hasKey, setKey, clearKey } from './brain.js';
 import { generateShape } from './shapes.js';
 import { createLogo } from './logo.js';
 import { createRex3d } from './rex3d.js';
-import { createVerdichtung } from './verdichtung.js';
+import { createDichte } from './dichte.js';
 import { createFeld } from './feld.js';
 import { createAuswahl } from './auswahl.js';
 import { createKarte } from './agentenkarte.js';
@@ -180,10 +180,11 @@ export function createDirigent(store, kamera) {
     dissolveIds: (ids) => dissolveIds(ids),
     revert: (id) => revert(id),
   });
-  const verdichtung = createVerdichtung(store, {
+  const dichte = createDichte(store, {
     kamera, registerTask,
     dissolveIds: (ids) => dissolveIds(ids),
     revert: (id) => revert(id),
+    showNote: (msg) => showNote(msg),
   });
   const auswahl = createAuswahl(store, logo);
 
@@ -831,7 +832,7 @@ export function createDirigent(store, kamera) {
       return false;
     }
     if (e.key === 'Escape') {
-      if (verdichtung.aufloesen(tNow)) return true;
+      if (dichte.aufloesen(tNow)) return true;
       if (rex3d.isOpen) { rex3d.close(); return true; }
       if (karte.isOpen) { karte.close(); return true; }
       if (brainIds.length > 0) { dissolveBrain(); return true; }
@@ -888,8 +889,6 @@ export function createDirigent(store, kamera) {
     reiseUpdate(t);
     linseUpdate(t, dt);
     rex3d.update(t, dt);
-    verdichtung.update(t);
-    verdichtung.vorschau();
 
     if (thinkIds.length > 0) {
       const b = 0.5 + 0.5 * Math.sin(t * 4);
@@ -934,26 +933,30 @@ export function createDirigent(store, kamera) {
     onSwipe(dx, dy) {
       if (activeApp && activeApp.onSwipe) activeApp.onSwipe(dx, dy);
     },
-    onPointerDown(sx, sy, ctrl = false) {
+    onPointerDown(sx, sy) {
       if (feld.isOpen) return false; // Prompt-Eingabe: nicht malen/zeichnen
       const w = kamera.screenToWorld(sx, sy);
-      // ctrl + Ziehen: Verdichtungs-Rechteck (Kernfunktion, Test-UI)
-      if (ctrl && !activeApp) return verdichtung.down(w.x, w.y);
       if (holePointerDown(w.x, w.y)) return true;
       if (!activeApp || !activeApp.onPointerDown) return false;
       return activeApp.onPointerDown(w.x, w.y);
     },
     onPointerDrag(sx, sy) {
       const w = kamera.screenToWorld(sx, sy);
-      if (verdichtung.move(w.x, w.y)) return;
       if (holePointerDrag(w.x, w.y)) return;
       if (!activeApp || !activeApp.onPointerDrag) return;
       activeApp.onPointerDrag(w.x, w.y);
     },
     onPointerUp() {
-      if (verdichtung.up(tNow)) { suppressClick = tNow + 0.3; return; }
       holePointerUp();
       if (activeApp && activeApp.onPointerUp) activeApp.onPointerUp();
+    },
+    // DICHTE-VERSUCH: Doppelklick auf die freie Fläche — der ganze
+    // Schwarm verdichtet sich zur Vollfläche; nochmal (oder Esc) löst auf
+    onDoubleClick() {
+      if (activeApp || feld.isOpen || karte.isOpen) return false;
+      suppressClick = tNow + 0.3;
+      if (dichte.aktiv) return dichte.aufloesen(tNow);
+      return dichte.ausloesen(tNow);
     },
     get text() { return feld.text; },
     get hovered() { return auswahl.hovered; },
@@ -971,7 +974,6 @@ export function createDirigent(store, kamera) {
       const list = [logo.anchor(), rex3d.anchor()].filter(Boolean);
       return list.length > 0 ? list : null;
     },
-    get zonen() { return verdichtung.zonen(tNow); },
     get veil() {
       if (karte.rect) return karte.rect;
       if (brainRect) return brainRect;

@@ -32,7 +32,12 @@ export function buildGitter(mode, viewW, viewH) {
   if (((col0 + row0) & 1) !== G.litParity) row0 -= 1;
 
   const latticeCount = cols * rows;
-  const count = latticeCount + CONFIG.pool.reserve;
+  // Pool = so viele Agenten wie PIXEL (plus Marge) — eine Vollbild-
+  // Verdichtung ist damit exakt füllbar; config.pool.reserve ist das
+  // Minimum, die 1.2M-Grenze schützt den Speicher bei Riesenfenstern
+  const reserve = Math.min(1200000,
+    Math.max(CONFIG.pool.reserve, Math.ceil(w * h * 1.05)));
+  const count = latticeCount + reserve;
   const lit = G.litParity;
 
   const carrier = new Uint8Array(count);

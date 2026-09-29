@@ -20,7 +20,10 @@ export const CONFIG = {
     latFaktor: 4,         // Gesamtgitter = latFaktor × Landing-Fenster
   },
 
-  pool: { reserve: 260000 }, // Slots für Text/Bilder/Apps (1px-Verdichtung)
+  pool: { reserve: 260000 }, // Mindest-Slots für Text/Bilder/Apps; wächst in
+                             // gitter.js auf die Canvas-Pixelzahl („so viele
+                             // Agenten wie Pixel") — Vollbild-Verdichtung ist
+                             // damit exakt füllbar
 
   kamera: {
     ease: 10,             // 1/s — kritisch gedämpfte Annäherung an scaleTgt
@@ -227,12 +230,10 @@ export const CONFIG = {
     welleKick: 2.2,       //   mit schneller Justier-Welle; saug = Zusatz-
   },                      //   Sog während des Flugs
 
-  verdichtung: {          // Kernfunktion: Fläche verdichtet sich auf 1×1 px.
-    maxAgenten: 12000,    // Die Welle konsumiert das Lattice Ring für Ring;
-    bandPx: 50,           // Nachschub kommt in RASTERDICHTE und voller
-    kettenSpeed: 26,      // Größe von jenseits — geschrumpft wird nur in
-    schrumpf: 0.4,        // der Übergangszone (bandPx) vor dem Rechteck;
-  },                      //   maxAgenten begrenzt die Auflösung zeitlich
+  dichte: {                // VERSUCH: Doppelklick — der GANZE Schwarm
+    streu: 2.5,            // verdichtet sich gleichzeitig zur Vollfläche
+    weiss: [255, 255, 255],// (so viele Agenten wie Pixel). streu = Start-
+  },                       // Aufblähung des Pixelrasters um die Bildmitte
 
   malen: {                // Paint (Referenz 05) — Offsets in Zellen vom Rahmen
     canvas: { dx: 2.3, dy: 2.5, w: 5.6, h: 3.5 }, // weiße Fläche (1px-Agenten)

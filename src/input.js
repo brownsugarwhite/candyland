@@ -99,6 +99,13 @@ export function attachInput(canvas, dirigent, kamera, actions) {
     dirigent.onClick(p.x, p.y);
   };
 
+  // Doppelklick: Dichte-Versuch (der ganze Schwarm → Vollfläche)
+  const onDblClick = (e) => {
+    if (pinched) return;
+    const p = toScreen(e);
+    dirigent.onDoubleClick(p.x, p.y);
+  };
+
   // Mausrad/Pinch ZOOMEN (wie gehabt); nur klar horizontale 2-Finger-
   // Bewegung verschiebt. Pan primär: 2-Finger-Touch + mittlere Maustaste.
   const onWheel = (e) => {
@@ -137,6 +144,7 @@ export function attachInput(canvas, dirigent, kamera, actions) {
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerleave', onPointerLeave);
   canvas.addEventListener('click', onClick);
+  canvas.addEventListener('dblclick', onDblClick);
   canvas.addEventListener('wheel', onWheel, { passive: false });
   window.addEventListener('keydown', onKeyDown);
   document.addEventListener('paste', onPaste);
@@ -148,6 +156,7 @@ export function attachInput(canvas, dirigent, kamera, actions) {
     canvas.removeEventListener('pointermove', onPointerMove);
     canvas.removeEventListener('pointerleave', onPointerLeave);
     canvas.removeEventListener('click', onClick);
+    canvas.removeEventListener('dblclick', onDblClick);
     canvas.removeEventListener('wheel', onWheel);
     window.removeEventListener('keydown', onKeyDown);
     document.removeEventListener('paste', onPaste);

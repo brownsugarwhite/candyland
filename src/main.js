@@ -113,7 +113,6 @@ async function build(mode, viewW, viewH) {
       warpRects: dirigent.warpRects,
       veil: dirigent.veil,
       anchors: dirigent.anchors,
-      zonen: dirigent.zonen,
       wellen,
     });
     dirigent.update(w.tSim);
@@ -300,9 +299,12 @@ toggles.high.addEventListener('click', () => mode !== 'high' && setMode('high'))
         world.advance(0.7);
       } else if (cmd === 'warte') {
         world.advance(nums[0] || 1);
-      } else if (cmd === 'zieh') { // 5. Zahl = 1 → mit ctrl (Verdichtung)
+      } else if (cmd === 'doppel') { // Doppelklick (Dichte-Versuch)
+        world.dirigent.onDoubleClick(nums[0] || 0, nums[1] || 0);
+        world.advance(0.02);
+      } else if (cmd === 'zieh') {
         world.dirigent.onPointerMove(nums[0], nums[1]);
-        world.dirigent.onPointerDown(nums[0], nums[1], nums[4] === 1);
+        world.dirigent.onPointerDown(nums[0], nums[1]);
         for (let k = 1; k <= 16; k++) {
           const x = nums[0] + ((nums[2] - nums[0]) * k) / 16;
           const y = nums[1] + ((nums[3] - nums[1]) * k) / 16;
@@ -359,10 +361,40 @@ toggles.high.addEventListener('click', () => mode !== 'high' && setMode('high'))
         col: [s.colR[i] | 0, s.colG[i] | 0, s.colB[i] | 0],
       });
     }
+    // Pixel-Dienst-Statistik (Verdichtung/malen): Farben & Größen aller
+    // IMAGE-Agenten — verrät, ob eine Fläche wirklich weiß und 1 px ist
+    const px = { n: 0, frozen: 0, colMin: 999, colMax: -1, colSum: 0,
+      tgtSum: 0, sizePxMin: 999, sizePxMax: -1, maxId: -1 };
+    for (let k = 0; k < s.activeCount; k++) {
+      const i = s.activeList[k];
+      if (s.active[i] === 0 || s.state[i] !== STATE.IMAGE) continue;
+      px.n++;
+      if (s.frozen[i] === 1) px.frozen++;
+      const c = s.colR[i];
+      if (c < px.colMin) px.colMin = c;
+      if (c > px.colMax) px.colMax = c;
+      px.colSum += c;
+      px.tgtSum += s.tgtR[i];
+      const sp = s.sizeTgt[i] * world.kamera.scale;
+      if (sp < px.sizePxMin) px.sizePxMin = sp;
+      if (sp > px.sizePxMax) { px.sizePxMax = sp; px.maxId = i; }
+    }
+    const pixelStat = px.n === 0 ? null : {
+      n: px.n, frozen: px.frozen,
+      col: [Math.round(px.colMin), Math.round(px.colSum / px.n), Math.round(px.colMax)],
+      tgtAvg: Math.round(px.tgtSum / px.n),
+      sizePx: [+px.sizePxMin.toFixed(2), +px.sizePxMax.toFixed(2)],
+      maxAgent: px.maxId < 0 ? null : {
+        id: px.maxId, carrier: s.carrier[px.maxId], task: s.taskId[px.maxId],
+        x: +s.posX[px.maxId].toFixed(2), y: +s.posY[px.maxId].toFixed(2),
+        hover: +s.hover[px.maxId].toFixed(2), shape: s.shapeB[px.maxId],
+      },
+    };
     const pre = document.createElement('pre');
     pre.id = 'dump';
     pre.textContent = JSON.stringify({
       selftest: world.selftest(),
+      pixelStat,
       linse: world.store.linse,
       p3d: {
         aktiv: world.store.p3d.aktiv,
